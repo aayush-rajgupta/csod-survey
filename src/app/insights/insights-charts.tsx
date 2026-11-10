@@ -19,14 +19,14 @@ const colors = ["#059669", "#0f766e", "#0e7490", "#2563eb", "#7c3aed", "#c026d3"
 function ChartCard({ title, metric }: { title: string; metric: InsightMetric }) {
   if (metric.sampleSize < 5) {
     return (
-      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
         <h3 className="font-semibold">{title}</h3>
         <p className="mt-4 text-sm text-slate-500">Breakdown suppressed: fewer than 5 valid answers (n={metric.sampleSize}).</p>
       </section>
     );
   }
   return (
-    <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-4">
         <h3 className="font-semibold">{title}</h3>
         <span className="text-xs text-slate-500">n={metric.sampleSize}</span>
@@ -50,7 +50,7 @@ function ChartCard({ title, metric }: { title: string; metric: InsightMetric }) 
 
 function TrendChart({ insights }: { insights: PublicInsights }) {
   return (
-    <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-4">
         <h3 className="font-semibold">Responses over time</h3>
         <span className="text-xs text-slate-500">n={insights.responseCount}</span>
@@ -108,14 +108,14 @@ function Explorer({ insights }: { insights: PublicInsights }) {
   }, [citySlug, fromDate, insights, metricKey, toDate]);
 
   return (
-    <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Response explorer</p><h2 className="mt-2 text-2xl font-semibold">Explore distributions</h2></div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <label className="text-sm font-medium">City<select value={citySlug} onChange={(event) => setCitySlug(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-950"><option value="all">All cities</option>{insights.cities.filter((city) => city.eligible).map((city) => <option key={city.slug} value={city.slug}>{city.name}</option>)}</select></label>
-          <label className="text-sm font-medium">Question<select value={metricKey} onChange={(event) => setMetricKey(event.target.value as InsightMetric["key"])} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-950">{insights.metrics.map((item) => <option key={item.key} value={item.key}>{item.question}</option>)}</select></label>
-          <label className="text-sm font-medium">From<input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} disabled={citySlug !== "all"} min={insights.availableDates[0]} max={insights.availableDates.at(-1)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-950" /></label>
-          <label className="text-sm font-medium">To<input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} disabled={citySlug !== "all"} min={insights.availableDates[0]} max={insights.availableDates.at(-1)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-950" /></label>
+          <label className="text-sm font-medium">City<select value={citySlug} onChange={(event) => setCitySlug(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2"><option value="all">All cities</option>{insights.cities.filter((city) => city.eligible).map((city) => <option key={city.slug} value={city.slug}>{city.name}</option>)}</select></label>
+          <label className="text-sm font-medium">Question<select value={metricKey} onChange={(event) => setMetricKey(event.target.value as InsightMetric["key"])} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2">{insights.metrics.map((item) => <option key={item.key} value={item.key}>{item.question}</option>)}</select></label>
+          <label className="text-sm font-medium">From<input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} disabled={citySlug !== "all"} min={insights.availableDates[0]} max={insights.availableDates.at(-1)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2" /></label>
+          <label className="text-sm font-medium">To<input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} disabled={citySlug !== "all"} min={insights.availableDates[0]} max={insights.availableDates.at(-1)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2" /></label>
         </div>
       </div>
       {metric ? <ChartCard title={metric.question} metric={metric} /> : <p className="mt-5 text-sm text-slate-500">Choose a breakdown.</p>}

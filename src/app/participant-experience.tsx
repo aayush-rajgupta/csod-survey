@@ -294,12 +294,6 @@ export default function ParticipantExperience({
           <div className="hidden items-center gap-2 text-sm text-slate-500 sm:flex">
             <LockKeyhole className="size-4" /> Your email stays private
           </div>
-          <Link
-            href="/insights"
-            className="text-sm font-semibold text-emerald-700 hover:text-emerald-800"
-          >
-            Explore insights
-          </Link>
         </header>
 
         {step !== "welcome" && step !== "confirmation" && (
@@ -341,12 +335,20 @@ export default function ParticipantExperience({
                   Share a few minutes of your experience to help researchers
                   understand air quality across India&apos;s growing cities.
                 </p>
-                <button
-                  onClick={() => setStep("profile")}
-                  className="mt-9 inline-flex items-center gap-2 rounded-full bg-slate-950 px-6 py-3.5 font-semibold text-white transition hover:bg-emerald-700"
-                >
-                  Start the survey <ArrowRight className="size-4" />
-                </button>
+                <div className="mt-9 flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={() => setStep("profile")}
+                    className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-6 py-3.5 font-semibold text-white transition hover:bg-emerald-700"
+                  >
+                    Start the survey <ArrowRight className="size-4" />
+                  </button>
+                  <Link
+                    href="/insights"
+                    className="inline-flex items-center gap-2 rounded-full border border-emerald-600 bg-white px-6 py-3.5 font-semibold text-emerald-700 transition hover:bg-emerald-50"
+                  >
+                    Explore insights <ArrowRight className="size-4" />
+                  </Link>
+                </div>
                 <div className="mt-8 flex flex-wrap gap-5 text-sm text-slate-500">
                   <span className="flex items-center gap-2">
                     <ShieldCheck className="size-4 text-emerald-600" /> Privacy-first
