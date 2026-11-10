@@ -82,8 +82,9 @@ function normalizeEmail(email: string): string {
 function appUrl(): string {
   const value = process.env.NEXT_PUBLIC_APP_URL;
   if (!value) throw new ParticipantVerificationError(
-    "Email verification is temporarily unavailable.",
+    "Missing NEXT_PUBLIC_APP_URL.",
     "resend-config",
+    "Email verification is temporarily unavailable.",
   );
   return value.replace(/\/$/u, "");
 }
@@ -98,8 +99,9 @@ async function sendVerificationEmail(email: string, token: string): Promise<void
   const from = process.env.RESEND_FROM_EMAIL;
   if (!apiKey || !from) {
     throw new ParticipantVerificationError(
-      "Email verification is temporarily unavailable.",
+      `Missing Resend configuration: ${!apiKey ? "RESEND_API_KEY" : ""}${!apiKey && !from ? ", " : ""}${!from ? "RESEND_FROM_EMAIL" : ""}.`,
       "resend-config",
+      "Email verification is temporarily unavailable.",
     );
   }
 
@@ -119,10 +121,11 @@ async function sendVerificationEmail(email: string, token: string): Promise<void
 
   if (!response.ok) {
     throw new ParticipantVerificationError(
+      `Resend delivery failed with HTTP ${response.status}.`,
+      "resend-delivery",
       response.status === 401 || response.status === 403
         ? "Email verification is temporarily unavailable. Please check the configured Resend sender."
         : "Email verification is temporarily unavailable. Please try again later.",
-      "resend-delivery",
     );
   }
 }
@@ -159,9 +162,10 @@ export async function requestParticipantVerification(input: {
     ]);
   if (emailLimit.error || ipLimit.error) {
     throw new ParticipantVerificationError(
-      "Verification is temporarily unavailable. Please try again later.",
+        `Rate-limit RPC failed: ${emailLimit.error?.message ?? ipLimit.error?.message ?? "unknown error"}`,
       stage,
-    );
+        "Verification is temporarily unavailable. Please try again later.",
+      );
   }
   if (emailLimit.data !== true || ipLimit.data !== true) {
     return { ok: true };
