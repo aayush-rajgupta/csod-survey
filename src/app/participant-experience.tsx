@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Link from "next/link";
 import {
   ArrowRight,
   Check,
@@ -293,6 +294,12 @@ export default function ParticipantExperience({
           <div className="hidden items-center gap-2 text-sm text-slate-500 sm:flex">
             <LockKeyhole className="size-4" /> Your email stays private
           </div>
+          <Link
+            href="/insights"
+            className="text-sm font-semibold text-emerald-700 hover:text-emerald-800"
+          >
+            Explore insights
+          </Link>
         </header>
 
         {step !== "welcome" && step !== "confirmation" && (
