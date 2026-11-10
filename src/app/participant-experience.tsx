@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ArrowRight,
   Check,
@@ -21,6 +21,7 @@ import type { City, SurveyQuestion, Zone } from "@/lib/survey-data";
 
 type Props = { cities: City[] };
 type Step = "welcome" | "profile" | "survey" | "consent" | "review" | "confirmation";
+type AnswerValue = string | string[];
 
 const steps: Array<{ key: Step; label: string }> = [
   { key: "profile", label: "About you" },
@@ -38,7 +39,7 @@ export default function ParticipantExperience({
   const [email, setEmail] = useState("");
   const [zones, setZones] = useState<Zone[]>([]);
   const [questions, setQuestions] = useState<SurveyQuestion[]>([]);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [answers, setAnswers] = useState<Record<string, AnswerValue>>({});
   const [researchConsent, setResearchConsent] = useState(false);
   const [publicConsent, setPublicConsent] = useState(false);
   const [communicationConsent, setCommunicationConsent] = useState(false);
@@ -48,6 +49,7 @@ export default function ParticipantExperience({
   }>();
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const questionRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const selectedCity = cities.find((city) => city.id === cityId);
   const currentStep = steps.findIndex(({ key }) => key === step);
@@ -92,8 +94,113 @@ export default function ParticipantExperience({
     }
   }
 
-  function updateAnswer(questionId: string, value: string) {
+  function updateAnswer(questionId: string, value: AnswerValue) {
     setAnswers((current) => ({ ...current, [questionId]: value }));
+  }
+
+  function validateQuestionAnswer(
+    question: SurveyQuestion,
+    answer: AnswerValue | undefined,
+  ): string | null {
+    const rules = question.validation_rules;
+    const allowedValues = Array.isArray(rules.allowed_values)
+      ? rules.allowed_values.map(String)
+      : question.options.map(String);
+
+    if (question.question_type === "checkboxes") {
+      const selected = Array.isArray(answer) ? answer : [];
+      if (question.is_required && selected.length === 0) {
+        return "Select at least one option.";
+      }
+      if (selected.some((value) => !allowedValues.includes(value))) {
+        return "Choose only the listed options.";
+      }
+      const minItems = typeof rules.min_items === "number" ? rules.min_items : 0;
+      const maxItems =
+        typeof rules.max_items === "number" ? rules.max_items : Number.POSITIVE_INFINITY;
+      if (selected.length < minItems) {
+        return `Select at least ${minItems} option${minItems === 1 ? "" : "s"}.`;
+      }
+      if (selected.length > maxItems) {
+        return `Select no more than ${maxItems} options.`;
+      }
+      const mutuallyExclusive = Array.isArray(rules.mutually_exclusive)
+        ? rules.mutually_exclusive.map(String)
+        : [];
+      if (
+        mutuallyExclusive.some((value) => selected.includes(value)) &&
+        selected.length > 1
+      ) {
+        return "Choose either a single 'Not sure' or 'I do not notice these sources' option.";
+      }
+      return null;
+    }
+
+    const value = typeof answer === "string" ? answer.trim() : "";
+    if (!value) {
+      return question.is_required ? "This question is required." : null;
+    }
+    if (
+      ["multiple_choice", "dropdown"].includes(question.question_type) &&
+      !allowedValues.includes(value)
+    ) {
+      return "Choose one of the listed options.";
+    }
+    if (["number", "linear_scale"].includes(question.question_type)) {
+      const numericValue = Number(value);
+      if (!Number.isFinite(numericValue)) return "Enter a valid number.";
+      if (typeof rules.min === "number" && numericValue < rules.min) {
+        return `Enter a number of at least ${rules.min}.`;
+      }
+      if (typeof rules.max === "number" && numericValue > rules.max) {
+        return `Enter a number no greater than ${rules.max}.`;
+      }
+      if (
+        typeof rules.step === "number" &&
+        Math.abs(numericValue / rules.step - Math.round(numericValue / rules.step)) > 1e-9
+      ) {
+        return `Enter a number in steps of ${rules.step}.`;
+      }
+    }
+    if (question.question_type === "long_text") {
+      if (
+        typeof rules.min_length === "number" &&
+        value.length < rules.min_length
+      ) {
+        return `Enter at least ${rules.min_length} characters.`;
+      }
+      if (
+        typeof rules.max_length === "number" &&
+        value.length > rules.max_length
+      ) {
+        return `Enter no more than ${rules.max_length} characters.`;
+      }
+    }
+    return null;
+  }
+
+  function missingQuestions(): Array<{ question: SurveyQuestion; error: string }> {
+    return questions.flatMap((question) => {
+      const error = validateQuestionAnswer(question, answers[question.id]);
+      return error ? [{ question, error }] : [];
+    });
+  }
+
+  function continueToConsent() {
+    const missing = missingQuestions();
+    if (missing.length) {
+      const first = missing[0];
+      setMessage(
+        `Please complete: ${missing.map(({ question }) => question.question_text).join("; ")}`,
+      );
+      questionRefs.current[first.question.id]?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+      return;
+    }
+    setMessage("");
+    setStep("consent");
   }
 
   async function finishSubmission() {
@@ -121,12 +228,6 @@ export default function ParticipantExperience({
       setLoading(false);
     }
   }
-
-  const canReview =
-    researchConsent &&
-    questions.every(
-      (question) => !question.is_required || Boolean(answers[question.id]),
-    );
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_right,#d1fae5,transparent_35%),var(--background)]">
@@ -317,8 +418,11 @@ export default function ParticipantExperience({
               </h2>
               <div className="mt-8 space-y-6">
                 {questions.map((question) => (
-                  <label
+                  <div
                     key={question.id}
+                    ref={(node) => {
+                      questionRefs.current[question.id] = node;
+                    }}
                     className="block rounded-2xl border border-slate-200 bg-white p-5 text-sm font-semibold"
                   >
                     <span>
@@ -327,15 +431,45 @@ export default function ParticipantExperience({
                         <span className="ml-1 text-emerald-600">*</span>
                       )}
                     </span>
-                    {question.question_type === "long_text" ? (
+                    {question.question_type === "checkboxes" ? (
+                      <div className="mt-3 space-y-2">
+                        {question.options.map((option) => {
+                          const value = String(option);
+                          const selected = Array.isArray(answers[question.id])
+                            ? answers[question.id].includes(value)
+                            : false;
+                          return (
+                            <label key={value} className="flex items-center gap-3 rounded-xl border border-slate-200 p-3 font-normal">
+                              <input
+                                type="checkbox"
+                                checked={selected}
+                                onChange={(event) => {
+                                  const current = Array.isArray(answers[question.id])
+                                    ? [...answers[question.id]]
+                                    : [];
+                                  updateAnswer(
+                                    question.id,
+                                    event.target.checked
+                                      ? [...current, value]
+                                      : current.filter((item) => item !== value),
+                                  );
+                                }}
+                                className="size-4 accent-emerald-600"
+                              />
+                              {value}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    ) : question.question_type === "long_text" ? (
                       <textarea
-                        value={answers[question.id] ?? ""}
+                        value={typeof answers[question.id] === "string" ? answers[question.id] : ""}
                         onChange={(event) => updateAnswer(question.id, event.target.value)}
                         className="mt-3 min-h-28 w-full rounded-xl border border-slate-200 p-3 font-normal outline-none focus:border-emerald-500"
                       />
-                    ) : question.options.length ? (
+                    ) : ["multiple_choice", "dropdown"].includes(question.question_type) ? (
                       <select
-                        value={answers[question.id] ?? ""}
+                        value={typeof answers[question.id] === "string" ? answers[question.id] : ""}
                         onChange={(event) => updateAnswer(question.id, event.target.value)}
                         className="mt-3 w-full rounded-xl border border-slate-200 bg-white p-3 font-normal outline-none focus:border-emerald-500"
                       >
@@ -348,18 +482,19 @@ export default function ParticipantExperience({
                       </select>
                     ) : (
                       <input
-                        value={answers[question.id] ?? ""}
+                        type={["number", "linear_scale"].includes(question.question_type) ? "number" : "text"}
+                        value={typeof answers[question.id] === "string" ? answers[question.id] : ""}
                         onChange={(event) => updateAnswer(question.id, event.target.value)}
                         className="mt-3 w-full rounded-xl border border-slate-200 p-3 font-normal outline-none focus:border-emerald-500"
                       />
                     )}
-                  </label>
+                  </div>
                 ))}
               </div>
               {message && <p role="alert" className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">{message}</p>}
               <div className="mt-8 flex justify-between">
                 <button onClick={() => setStep("profile")} className="inline-flex items-center gap-2 rounded-full px-4 py-3 font-semibold text-slate-600 hover:bg-slate-100"><ChevronLeft className="size-4" /> Back</button>
-                <button onClick={() => canReview ? setStep("consent") : setMessage("Please answer every required question.")} className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-6 py-3 font-semibold text-white hover:bg-emerald-700">Continue <ArrowRight className="size-4" /></button>
+                <button onClick={continueToConsent} className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-6 py-3 font-semibold text-white hover:bg-emerald-700">Continue <ArrowRight className="size-4" /></button>
               </div>
             </div>
           )}

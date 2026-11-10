@@ -173,17 +173,45 @@ export async function submitParticipantSurvey(input: {
   for (const submitted of input.answers) {
     const question = questionMap.get(submitted.question_id);
     if (!question) continue;
-    const value = String(submitted.answer ?? "").trim();
+    const isCheckboxes = question.question_type === "checkboxes";
+    const selected = isCheckboxes && Array.isArray(submitted.answer)
+      ? submitted.answer.map(String)
+      : [];
+    const value = typeof submitted.answer === "string"
+      ? submitted.answer.trim()
+      : "";
     const rules = question.validation_rules;
-    if (!value && question.is_required) {
+    if (
+      question.is_required &&
+      (isCheckboxes ? selected.length === 0 : !value)
+    ) {
       throw new Error("Please answer every required question.");
     }
-    if (
-      question.options.length &&
-      value &&
-      !question.options.map(String).includes(value)
-    ) {
+    const allowedValues = Array.isArray(rules.allowed_values)
+      ? rules.allowed_values.map(String)
+      : question.options.map(String);
+    if (isCheckboxes && selected.some((item) => !allowedValues.includes(item))) {
       throw new Error("One or more answers are not valid for the active questionnaire.");
+    }
+    if (!isCheckboxes && question.options.length && value && !allowedValues.includes(value)) {
+      throw new Error("One or more answers are not valid for the active questionnaire.");
+    }
+    if (isCheckboxes) {
+      const minItems = typeof rules.min_items === "number" ? rules.min_items : 0;
+      const maxItems =
+        typeof rules.max_items === "number" ? rules.max_items : Number.POSITIVE_INFINITY;
+      const mutuallyExclusive = Array.isArray(rules.mutually_exclusive)
+        ? rules.mutually_exclusive.map(String)
+        : [];
+      if (selected.length < minItems || selected.length > maxItems) {
+        throw new Error("The number of selected options is not valid.");
+      }
+      if (
+        mutuallyExclusive.some((item) => selected.includes(item)) &&
+        selected.length > 1
+      ) {
+        throw new Error("Mutually exclusive options cannot be selected together.");
+      }
     }
     if (
       question.question_type === "number" &&
