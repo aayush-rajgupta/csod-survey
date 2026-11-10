@@ -17,6 +17,35 @@ function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+    value,
+  );
+}
+
+function sanitizedDatabaseError(error: {
+  code?: string;
+  message?: string;
+  details?: string;
+  hint?: string;
+}): { code: string; message: string; details?: string; hint?: string } {
+  const redact = (value: string | undefined) =>
+    value
+      ?.replace(/[^\s@]+@[^\s@]+\.[^\s@]+/gu, "[redacted-email]")
+      .replace(
+        /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/giu,
+        "[redacted-uuid]",
+      )
+      .replace(/\b[A-Za-z0-9_-]{32,}\b/gu, "[redacted-token]")
+      .slice(0, 240);
+  return {
+    code: error.code ?? "unknown",
+    message: redact(error.message) ?? "unknown database error",
+    ...(error.details ? { details: redact(error.details) } : {}),
+    ...(error.hint ? { hint: redact(error.hint) } : {}),
+  };
+}
+
 export class ParticipantRegistrationError extends Error {
   constructor(readonly publicMessage: string) {
     super(publicMessage);
@@ -44,11 +73,23 @@ export async function registerParticipant(input: {
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)) {
     throw new ParticipantRegistrationError("Enter a valid email address.");
   }
-  if (!input.cityId || !input.zoneId) {
-    throw new ParticipantRegistrationError("Choose your city and zone.");
+  if (!input.cityId) {
+    throw new ParticipantRegistrationError("Choose a city.");
+  }
+  if (!isUuid(input.cityId)) {
+    throw new ParticipantRegistrationError("The selected city is invalid.");
+  }
+  if (!input.zoneId) {
+    throw new ParticipantRegistrationError("Choose a zone.");
+  }
+  if (!isUuid(input.zoneId)) {
+    throw new ParticipantRegistrationError("The selected zone is invalid.");
   }
 
   const rawSession = randomBytes(32).toString("base64url");
+  const sessionExpiresAt = new Date(
+    Date.now() + sessionLifetimeSeconds * 1000,
+  );
   const supabase = createServiceClient();
   console.info("[participant-registration]", {
     operation: "register",
@@ -59,15 +100,15 @@ export async function registerParticipant(input: {
     p_city_id: input.cityId,
     p_zone_id: input.zoneId,
     p_session_token_hash: hashSecret(rawSession),
-    p_session_expires_at: new Date(
-      Date.now() + sessionLifetimeSeconds * 1000,
-    ).toISOString(),
+    p_session_expires_at: sessionExpiresAt.toISOString(),
   });
   if (error || !data?.[0]?.participant_id) {
     console.error("[participant-registration]", {
       operation: "register",
       stage: "register_participant_rpc",
-      errorCode: error?.code ?? "missing-participant-id",
+      error: error
+        ? sanitizedDatabaseError(error)
+        : { code: "missing-participant-id", message: "RPC returned no participant." },
     });
     throw new ParticipantRegistrationError(
       "Registration is temporarily unavailable. Please try again later.",
