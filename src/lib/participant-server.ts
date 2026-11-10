@@ -50,6 +50,10 @@ export async function registerParticipant(input: {
 
   const rawSession = randomBytes(32).toString("base64url");
   const supabase = createServiceClient();
+  console.info("[participant-registration]", {
+    operation: "register",
+    stage: "register_participant_rpc",
+  });
   const { data, error } = await supabase.rpc("register_participant", {
     p_email: email,
     p_city_id: input.cityId,
@@ -60,12 +64,21 @@ export async function registerParticipant(input: {
     ).toISOString(),
   });
   if (error || !data?.[0]?.participant_id) {
+    console.error("[participant-registration]", {
+      operation: "register",
+      stage: "register_participant_rpc",
+      errorCode: error?.code ?? "missing-participant-id",
+    });
     throw new ParticipantRegistrationError(
       "Registration is temporarily unavailable. Please try again later.",
     );
   }
 
   await setParticipantSession(rawSession);
+  console.info("[participant-registration]", {
+    operation: "register",
+    stage: "session-cookie",
+  });
   return { ok: true };
 }
 
