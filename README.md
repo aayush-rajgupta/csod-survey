@@ -33,7 +33,10 @@ least-privilege policies alongside their server-side operations.
    `supabase/migrations/0005_consent_lock_order_and_visibility_reconciliation.sql`,
    then `supabase/migrations/0006_enable_submission_sequence_rls.sql`, then
    `supabase/migrations/0007_participant_verification_and_submission.sql`, then
-   `supabase/migrations/0008_fix_verification_rate_limit_digest.sql`
+   `supabase/migrations/0008_fix_verification_rate_limit_digest.sql`, then
+   `supabase/migrations/0009_fix_participant_id_type.sql`, then
+   `supabase/migrations/0010_fix_submission_survey_version_ambiguity.sql`, then
+   `supabase/migrations/0011_update_rating_question_scales.sql`
    in a Supabase project.
 4. Start the development server:
 

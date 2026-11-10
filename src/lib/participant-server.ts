@@ -213,12 +213,20 @@ export async function submitParticipantSurvey(input: {
         throw new Error("Mutually exclusive options cannot be selected together.");
       }
     }
+    const numericValue = Number(value);
     if (
-      question.question_type === "number" &&
+      ["number", "linear_scale"].includes(question.question_type) &&
       value &&
-      Number.isNaN(Number(value))
+      !Number.isFinite(numericValue)
     ) {
       throw new Error("A numeric answer is required for one of the questions.");
+    }
+    if (
+      question.question_type === "linear_scale" &&
+      value &&
+      !Number.isInteger(numericValue)
+    ) {
+      throw new Error("A whole-number answer is required for this question.");
     }
     const minLength =
       typeof rules.min_length === "number" ? rules.min_length : undefined;
@@ -237,6 +245,14 @@ export async function submitParticipantSurvey(input: {
     }
     if (max !== undefined && Number(value) > max) {
       throw new Error("One or more answers are above the allowed range.");
+    }
+    const step = typeof rules.step === "number" ? rules.step : undefined;
+    if (
+      step !== undefined &&
+      value &&
+      Math.abs(numericValue / step - Math.round(numericValue / step)) > 1e-9
+    ) {
+      throw new Error("One or more answers use an invalid step.");
     }
   }
 

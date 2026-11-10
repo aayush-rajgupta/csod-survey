@@ -197,6 +197,15 @@ export default function ParticipantExperience({
     return null;
   }
 
+  function getScaleLabel(question: SurveyQuestion, value: string): string {
+    const labels = question.validation_rules.labels;
+    if (typeof labels !== "object" || labels === null || Array.isArray(labels)) {
+      return value;
+    }
+    const label = (labels as Record<string, unknown>)[value];
+    return typeof label === "string" ? label : value;
+  }
+
   function missingQuestions(): Array<{ question: SurveyQuestion; error: string }> {
     return questions.filter(isQuestionVisible).flatMap((question) => {
       const error = validateQuestionAnswer(question, answers[question.id]);
@@ -519,6 +528,42 @@ export default function ParticipantExperience({
                           </option>
                         ))}
                       </select>
+                    ) : question.question_type === "linear_scale" ? (
+                      <fieldset className="mt-4">
+                        <legend className="sr-only">{question.question_text}</legend>
+                        <div className="flex items-center justify-between gap-4 text-xs font-medium text-slate-500">
+                          <span>
+                            {getScaleLabel(question, "1")}
+                          </span>
+                          <span>
+                            {getScaleLabel(question, "10")}
+                          </span>
+                        </div>
+                        <div className="mt-3 grid grid-cols-5 gap-2 sm:grid-cols-10">
+                          {question.options.map((option) => {
+                            const value = String(option);
+                            return (
+                              <label
+                                key={value}
+                                className="flex cursor-pointer flex-col items-center gap-2 rounded-xl border border-slate-200 p-2 font-normal has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50"
+                              >
+                                <input
+                                  type="radio"
+                                  name={`question-${question.id}`}
+                                  value={value}
+                                  checked={answers[question.id] === value}
+                                  onChange={(event) =>
+                                    updateAnswer(question.id, event.target.value)
+                                  }
+                                  className="size-4 accent-emerald-600"
+                                  aria-label={`${value} out of 10`}
+                                />
+                                <span>{value}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </fieldset>
                     ) : (
                       <input
                         type={["number", "linear_scale"].includes(question.question_type) ? "number" : "text"}
