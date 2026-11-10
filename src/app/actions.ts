@@ -3,6 +3,8 @@
 import { getActiveQuestions, getActiveZones } from "@/lib/survey-data";
 import {
   getVerifiedParticipantId,
+  logParticipantVerificationFailure,
+  ParticipantVerificationError,
   requestParticipantVerification,
   submitParticipantSurvey,
 } from "@/lib/participant-server";
@@ -18,7 +20,18 @@ export async function loadQuestions(cityId: string) {
 }
 
 export async function requestVerification(email: string, cityId: string) {
-  return requestParticipantVerification({ email, cityId });
+  try {
+    return await requestParticipantVerification({ email, cityId });
+  } catch (error) {
+    if (error instanceof ParticipantVerificationError) {
+      return { ok: false as const, message: error.publicMessage };
+    }
+    logParticipantVerificationFailure("server-action", error);
+    return {
+      ok: false as const,
+      message: "Verification is temporarily unavailable. Please try again later.",
+    };
+  }
 }
 
 export async function checkParticipantSession() {

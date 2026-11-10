@@ -5,9 +5,11 @@ export function createServiceClient() {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!url || !serviceRoleKey) {
-    throw new Error(
-      "Participant data requires server-only Supabase configuration.",
-    );
+    const missing = [
+      !url ? "NEXT_PUBLIC_SUPABASE_URL" : null,
+      !serviceRoleKey ? "SUPABASE_SERVICE_ROLE_KEY" : null,
+    ].filter((name): name is string => name !== null);
+    throw new Error(`Missing server environment variables: ${missing.join(", ")}`);
   }
 
   return createClient(url, serviceRoleKey, {

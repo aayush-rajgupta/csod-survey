@@ -63,12 +63,16 @@ The participant verification and submission backend is now implemented in
 `src/lib/participant-server.ts` and migration
 `supabase/migrations/0007_participant_verification_and_submission.sql`.
 Configure `NEXT_PUBLIC_APP_URL`, `RESEND_API_KEY`, and `RESEND_FROM_EMAIL`
-server-side to send verification links through Resend. The service-role key
-must remain server-only. Verification tokens are random, single-use, hashed
+server-side to send verification links through Resend. `RESEND_FROM_EMAIL`
+must be a sender permitted by the Resend account (a verified domain/sender in
+Preview; Resend's shared test sender is subject to its recipient restrictions).
+The service-role key must remain server-only. Verification tokens are random, single-use, hashed
 with SHA-256, and expire after 30 minutes; participant sessions are opaque
 HttpOnly/Secure/SameSite cookies. Migration `0007` must be applied before
 using this flow; it adds zone persistence, verification/session tables, and
-the transactional submission function.
+the transactional submission function. Verification failures are logged
+server-side with an operation and stage identifier; sensitive request values
+are excluded and the browser receives only safe actionable messages.
 
 ## Database hardening
 

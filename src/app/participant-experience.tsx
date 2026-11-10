@@ -97,7 +97,11 @@ export default function ParticipantExperience({
     try {
       if (!verified) {
         if (!verificationSent) {
-          await requestVerification(email, cityId);
+          const result = await requestVerification(email, cityId);
+          if (!result.ok) {
+            setMessage(result.message);
+            return;
+          }
           setVerificationSent(true);
           setMessage("Check your inbox for a one-time verification link.");
           return;

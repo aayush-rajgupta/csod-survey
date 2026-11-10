@@ -11,6 +11,66 @@ const sessionCookie = "csod_participant_session";
 const verificationLifetimeMs = 30 * 60 * 1000;
 const sessionLifetimeSeconds = 30 * 24 * 60 * 60;
 
+type VerificationStage =
+  | "service-config"
+  | "rate-limit"
+  | "city-lookup"
+  | "participant-lookup"
+  | "participant-create"
+  | "token-prepare"
+  | "resend-config"
+  | "resend-delivery"
+  | "token-cleanup"
+  | "server-action";
+
+export class ParticipantVerificationError extends Error {
+  constructor(
+    message: string,
+    readonly stage: VerificationStage,
+    readonly publicMessage = message,
+  ) {
+    super(message);
+    this.name = "ParticipantVerificationError";
+  }
+}
+
+function sanitizedError(error: unknown): {
+  name: string;
+  message: string;
+  code?: string;
+} {
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  const message = rawMessage
+    .replace(/[^\s@]+@[^\s@]+\.[^\s@]+/gu, "[redacted-email]")
+    .replace(/https?:\/\/\S+/gu, "[redacted-url]")
+    .replace(/\b[A-Za-z0-9_-]{24,}\b/gu, "[redacted-token]")
+    .slice(0, 240);
+  const result: { name: string; message: string; code?: string } = {
+    name: error instanceof Error ? error.name : "UnknownError",
+    message,
+  };
+  if (
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    typeof error.code === "string"
+  ) {
+    result.code = error.code;
+  }
+  return result;
+}
+
+export function logParticipantVerificationFailure(
+  stage: VerificationStage,
+  error: unknown,
+): void {
+  console.error("[participant-verification]", {
+    operation: "request",
+    stage,
+    error: sanitizedError(error),
+  });
+}
+
 function hashSecret(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -21,7 +81,10 @@ function normalizeEmail(email: string): string {
 
 function appUrl(): string {
   const value = process.env.NEXT_PUBLIC_APP_URL;
-  if (!value) throw new Error("Missing NEXT_PUBLIC_APP_URL.");
+  if (!value) throw new ParticipantVerificationError(
+    "Email verification is temporarily unavailable.",
+    "resend-config",
+  );
   return value.replace(/\/$/u, "");
 }
 
@@ -34,8 +97,9 @@ async function sendVerificationEmail(email: string, token: string): Promise<void
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.RESEND_FROM_EMAIL;
   if (!apiKey || !from) {
-    throw new Error(
-      "Email verification is not configured. Set RESEND_API_KEY and RESEND_FROM_EMAIL.",
+    throw new ParticipantVerificationError(
+      "Email verification is temporarily unavailable.",
+      "resend-config",
     );
   }
 
@@ -54,7 +118,12 @@ async function sendVerificationEmail(email: string, token: string): Promise<void
   });
 
   if (!response.ok) {
-    throw new Error("The verification email could not be sent.");
+    throw new ParticipantVerificationError(
+      response.status === 401 || response.status === 403
+        ? "Email verification is temporarily unavailable. Please check the configured Resend sender."
+        : "Email verification is temporarily unavailable. Please try again later.",
+      "resend-delivery",
+    );
   }
 }
 
@@ -64,44 +133,66 @@ export async function requestParticipantVerification(input: {
 }): Promise<{ ok: true }> {
   const email = normalizeEmail(input.email);
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)) {
-    throw new Error("Enter a valid email address.");
+    throw new ParticipantVerificationError(
+      "Invalid email input.",
+      "server-action",
+      "Enter a valid email address.",
+    );
   }
 
-  const supabase = createServiceClient();
-  const ip = await requestIp();
-  const [emailLimit, ipLimit] = await Promise.all([
-    supabase.rpc("consume_participant_verification_rate_limit", {
-      p_key: `email:${email}`,
-      p_limit: 3,
-      p_window_seconds: 900,
-    }),
-    supabase.rpc("consume_participant_verification_rate_limit", {
-      p_key: `ip:${ip}`,
-      p_limit: 10,
-      p_window_seconds: 900,
-    }),
-  ]);
+  let stage: VerificationStage = "service-config";
+  try {
+    const supabase = createServiceClient();
+    stage = "rate-limit";
+    const ip = await requestIp();
+    const [emailLimit, ipLimit] = await Promise.all([
+      supabase.rpc("consume_participant_verification_rate_limit", {
+        p_key: `email:${email}`,
+        p_limit: 3,
+        p_window_seconds: 900,
+      }),
+      supabase.rpc("consume_participant_verification_rate_limit", {
+        p_key: `ip:${ip}`,
+        p_limit: 10,
+        p_window_seconds: 900,
+      }),
+    ]);
   if (emailLimit.error || ipLimit.error) {
-    throw new Error("Verification is temporarily unavailable.");
+    throw new ParticipantVerificationError(
+      "Verification is temporarily unavailable. Please try again later.",
+      stage,
+    );
   }
   if (emailLimit.data !== true || ipLimit.data !== true) {
     return { ok: true };
   }
 
+  stage = "city-lookup";
   const { data: city, error: cityError } = await supabase
     .from("cities")
     .select("id")
     .eq("id", input.cityId)
     .eq("is_active", true)
     .maybeSingle();
-  if (cityError || !city) throw new Error("Selected city is unavailable.");
+  if (cityError || !city) {
+    throw new ParticipantVerificationError(
+      "Selected city is unavailable.",
+      stage,
+    );
+  }
 
+  stage = "participant-lookup";
   const { data: existing, error: participantError } = await supabase
     .from("participants")
     .select("id, city_id, email_verified")
     .eq("email", email)
     .maybeSingle();
-  if (participantError) throw new Error("Unable to start email verification.");
+  if (participantError) {
+    throw new ParticipantVerificationError(
+      "Unable to start email verification. Please try again later.",
+      stage,
+    );
+  }
   if (existing && existing.city_id !== input.cityId) {
     return { ok: true };
   }
@@ -109,12 +200,16 @@ export async function requestParticipantVerification(input: {
   let participantId = existing?.id;
   let createdParticipant = false;
   if (!participantId) {
+    stage = "participant-create";
     const { data: publicId, error: allocationError } = await supabase.rpc(
       "next_participant_id",
       { p_city_id: input.cityId },
     );
     if (allocationError || typeof publicId !== "string") {
-      throw new Error("Unable to allocate a participant ID.");
+      throw new ParticipantVerificationError(
+        "Unable to start email verification. Please try again later.",
+        stage,
+      );
     }
     const { data: participant, error: insertError } = await supabase
       .from("participants")
@@ -125,18 +220,29 @@ export async function requestParticipantVerification(input: {
       })
       .select("id")
       .single();
-    if (insertError || !participant) throw new Error("Unable to create participant.");
+    if (insertError || !participant) {
+      throw new ParticipantVerificationError(
+        "Unable to start email verification. Please try again later.",
+        stage,
+      );
+    }
     participantId = participant.id;
     createdParticipant = true;
   }
 
+  stage = "token-prepare";
   const rawToken = randomBytes(32).toString("base64url");
   const { error: tokenError } = await supabase
     .from("participant_verification_tokens")
     .update({ used_at: new Date().toISOString() })
     .eq("participant_id", participantId)
     .is("used_at", null);
-  if (tokenError) throw new Error("Unable to prepare email verification.");
+  if (tokenError) {
+    throw new ParticipantVerificationError(
+      "Unable to prepare email verification. Please try again later.",
+      stage,
+    );
+  }
 
   const { error: insertTokenError } = await supabase
     .from("participant_verification_tokens")
@@ -145,11 +251,19 @@ export async function requestParticipantVerification(input: {
       token_hash: hashSecret(rawToken),
       expires_at: new Date(Date.now() + verificationLifetimeMs).toISOString(),
     });
-  if (insertTokenError) throw new Error("Unable to prepare email verification.");
+  if (insertTokenError) {
+    throw new ParticipantVerificationError(
+      "Unable to prepare email verification. Please try again later.",
+      stage,
+    );
+  }
 
   try {
+    stage = "resend-delivery";
     await sendVerificationEmail(email, rawToken);
   } catch (error) {
+    const deliveryStage = stage;
+    stage = "token-cleanup";
     const { error: tokenCleanupError } = await supabase
       .from("participant_verification_tokens")
       .delete()
@@ -163,11 +277,21 @@ export async function requestParticipantVerification(input: {
       participantCleanupError = cleanup.error;
     }
     if (tokenCleanupError || participantCleanupError) {
-      throw new Error("Verification is temporarily unavailable.");
+      throw new ParticipantVerificationError(
+        "Verification is temporarily unavailable. Please try again later.",
+        stage,
+      );
     }
+    stage = deliveryStage;
     throw error;
   }
   return { ok: true };
+  } catch (error) {
+    const failureStage =
+      error instanceof ParticipantVerificationError ? error.stage : stage;
+    logParticipantVerificationFailure(failureStage, error);
+    throw error;
+  }
 }
 
 export async function verifyParticipantToken(rawToken: string): Promise<string> {
