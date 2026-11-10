@@ -98,6 +98,24 @@ export default function ParticipantExperience({
     setAnswers((current) => ({ ...current, [questionId]: value }));
   }
 
+  function isQuestionVisible(question: SurveyQuestion): boolean {
+    const rule = question.visibility_rule;
+    if (!rule || typeof rule !== "object") return true;
+    const questionKey =
+      typeof rule.question_key === "string" ? rule.question_key : undefined;
+    if (!questionKey) return true;
+    const controllingQuestion = questions.find(
+      (candidate) => candidate.question_key === questionKey,
+    );
+    if (!controllingQuestion) return true;
+    const expected = rule.value ?? rule.equals;
+    if (expected === undefined) return true;
+    const answer = answers[controllingQuestion.id];
+    return Array.isArray(answer)
+      ? answer.includes(String(expected))
+      : String(answer ?? "") === String(expected);
+  }
+
   function validateQuestionAnswer(
     question: SurveyQuestion,
     answer: AnswerValue | undefined,
@@ -180,7 +198,7 @@ export default function ParticipantExperience({
   }
 
   function missingQuestions(): Array<{ question: SurveyQuestion; error: string }> {
-    return questions.flatMap((question) => {
+    return questions.filter(isQuestionVisible).flatMap((question) => {
       const error = validateQuestionAnswer(question, answers[question.id]);
       return error ? [{ question, error }] : [];
     });
@@ -202,6 +220,27 @@ export default function ParticipantExperience({
     setMessage("");
     setStep("consent");
   }
+
+  const renderedQuestions = questions.filter(isQuestionVisible);
+  const requiredQuestions = renderedQuestions.filter(
+    (question) => question.is_required,
+  );
+  const missingRequiredQuestions = requiredQuestions.filter((question) =>
+    validateQuestionAnswer(question, answers[question.id]),
+  );
+  const unsupportedQuestionTypes = renderedQuestions.filter(
+    (question) =>
+      ![
+        "short_text",
+        "long_text",
+        "number",
+        "date",
+        "multiple_choice",
+        "checkboxes",
+        "linear_scale",
+        "dropdown",
+      ].includes(question.question_type),
+  );
 
   async function finishSubmission() {
     setLoading(true);
@@ -417,7 +456,7 @@ export default function ParticipantExperience({
                 Tell us about your experience
               </h2>
               <div className="mt-8 space-y-6">
-                {questions.map((question) => (
+                {renderedQuestions.map((question) => (
                   <div
                     key={question.id}
                     ref={(node) => {
@@ -496,6 +535,33 @@ export default function ParticipantExperience({
                 <button onClick={() => setStep("profile")} className="inline-flex items-center gap-2 rounded-full px-4 py-3 font-semibold text-slate-600 hover:bg-slate-100"><ChevronLeft className="size-4" /> Back</button>
                 <button onClick={continueToConsent} className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-6 py-3 font-semibold text-white hover:bg-emerald-700">Continue <ArrowRight className="size-4" /></button>
               </div>
+              {process.env.NODE_ENV === "development" && (
+                <aside className="mt-6 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-xs text-slate-600">
+                  <p className="font-semibold">Development questionnaire diagnostics</p>
+                  <dl className="mt-2 grid grid-cols-2 gap-1">
+                    <dt>Total loaded questions</dt><dd>{questions.length}</dd>
+                    <dt>Total rendered questions</dt><dd>{renderedQuestions.length}</dd>
+                    <dt>Required questions</dt><dd>{requiredQuestions.length}</dd>
+                    <dt>Answered required questions</dt>
+                    <dd>{requiredQuestions.length - missingRequiredQuestions.length}</dd>
+                  </dl>
+                  {unsupportedQuestionTypes.length > 0 && (
+                    <p className="mt-2">
+                      Unsupported types: {unsupportedQuestionTypes.map((question) => question.question_type).join(", ")}
+                    </p>
+                  )}
+                  {missingRequiredQuestions.length > 0 && (
+                    <div className="mt-2">
+                      <p className="font-semibold">Missing required questions</p>
+                      <ul className="list-inside list-disc">
+                        {missingRequiredQuestions.map((question) => (
+                          <li key={question.id}>{question.id}: {question.question_text}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </aside>
+              )}
             </div>
           )}
 
