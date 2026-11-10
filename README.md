@@ -10,8 +10,9 @@ Mumbai, Bengaluru, Jamshedpur, and Patna.
 - **Data:** Supabase PostgreSQL. All writes will go through server-side
   validation and controlled mutations; public exploration will use an explicit
   anonymised projection rather than raw table reads.
-- **Authentication:** Supabase Auth for administrators only. Participants are
-  identified by a verified, private email and a stable public participant ID.
+- **Authentication:** Supabase Auth for administrators only. Participants use
+  opaque server-managed sessions and stable public participant IDs; email is
+  stored privately but is not verified.
 - **Boundaries:** `src/app` contains routes, `src/components` reusable UI,
   `src/lib` shared server/client utilities, and `supabase/migrations` database
   evolution.
@@ -31,7 +32,8 @@ least-privilege policies alongside their server-side operations.
    `supabase/migrations/0004_consent_and_integrity_corrections.sql`, then
    `supabase/migrations/0005_consent_lock_order_and_visibility_reconciliation.sql`,
    then `supabase/migrations/0006_enable_submission_sequence_rls.sql`, then
-   `supabase/migrations/0007_participant_verification_and_submission.sql`
+   `supabase/migrations/0007_participant_verification_and_submission.sql`, then
+   `supabase/migrations/0008_fix_verification_rate_limit_digest.sql`
    in a Supabase project.
 4. Start the development server:
 
@@ -44,7 +46,7 @@ Open http://localhost:3000.
 ## Planned milestones
 
 1. Seed supported cities and build the configurable survey/question schema.
-2. Implement verified participant registration and consent flows.
+2. Implement participant registration and consent flows.
 3. Implement server-side submissions with abuse controls.
 4. Add the anonymised public explorer and aggregate analytics.
 5. Add protected admin moderation, configuration, and exports.
@@ -59,20 +61,15 @@ participant email out of browser database reads, supports mobile-friendly
 questionnaire navigation, and presents research, public-display, and future
 communication consent as independent choices.
 
-The participant verification and submission backend is now implemented in
+The participant registration and submission backend is implemented in
 `src/lib/participant-server.ts` and migration
-`supabase/migrations/0007_participant_verification_and_submission.sql`.
-Configure `NEXT_PUBLIC_APP_URL`, `RESEND_API_KEY`, and `RESEND_FROM_EMAIL`
-server-side to send verification links through Resend. `RESEND_FROM_EMAIL`
-must be a sender permitted by the Resend account (a verified domain/sender in
-Preview; Resend's shared test sender is subject to its recipient restrictions).
-The service-role key must remain server-only. Verification tokens are random, single-use, hashed
-with SHA-256, and expire after 30 minutes; participant sessions are opaque
-HttpOnly/Secure/SameSite cookies. Migration `0007` must be applied before
-using this flow; it adds zone persistence, verification/session tables, and
-the transactional submission function. Verification failures are logged
-server-side with an operation and stage identifier; sensitive request values
-are excluded and the browser receives only safe actionable messages.
+`supabase/migrations/0008_fix_verification_rate_limit_digest.sql`.
+Registration stores a normalized email privately without verifying ownership or
+sending email. It creates a new participant and a cryptographically random
+opaque session; only the SHA-256 session hash is stored in the database, while
+the token is kept in an HttpOnly/Secure/SameSite cookie. The service-role key
+must remain server-only. Migration `0007` must be applied before `0008`; it
+provides the session table and transactional submission foundation.
 
 ## Database hardening
 
@@ -122,7 +119,7 @@ overridden by publication.
 Answered question definitions are immutable, including text, type, options,
 required state, validation and visibility rules, section, and ordering.
 Submission participants cannot change after answers or consent records exist.
-Submissions require a verified participant email.
+Submissions require an active participant session.
 
 Participant ID allocation now locks the city row, inspects existing IDs, and
 raises on malformed or mismatched IDs rather than silently risking a collision.
@@ -148,7 +145,7 @@ serializes grant/decline/withdrawal decisions within each stream. Publication
 uses the latest event and rejects ambiguous legacy authorization.
 
 The submission trigger again protects city, survey version, and participant
-changes independently, while retaining verified-email and active-city checks.
+changes independently, while retaining active-participant and active-city checks.
 Answered question keys are immutable along with the rest of the historical
 definition. `TRUNCATE` is explicitly revoked from `service_role` as well as
 public roles, and direct execution of the consent lock helper is limited to
@@ -197,7 +194,7 @@ as passed. See `tests/integration/README.md` for the required variable names.
 The database cannot safely replace all application policy. Server-side code
 must still:
 
-- Verify email ownership before marking a participant verified.
+- Keep participant session tokens opaque and store only their SHA-256 hashes.
 - Validate request payloads with Zod, including answer shape and value ranges
   described by each question's `validation_rules`.
 - Allocate a participant ID and insert the participant in one transaction,

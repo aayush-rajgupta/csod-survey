@@ -2,10 +2,8 @@
 
 import { getActiveQuestions, getActiveZones } from "@/lib/survey-data";
 import {
-  getVerifiedParticipantId,
-  logParticipantVerificationFailure,
-  ParticipantVerificationError,
-  requestParticipantVerification,
+  ParticipantRegistrationError,
+  registerParticipant,
   submitParticipantSurvey,
 } from "@/lib/participant-server";
 
@@ -19,23 +17,18 @@ export async function loadQuestions(cityId: string) {
   return getActiveQuestions(cityId);
 }
 
-export async function requestVerification(email: string, cityId: string) {
+export async function register(email: string, cityId: string, zoneId: string) {
   try {
-    return await requestParticipantVerification({ email, cityId });
+    return await registerParticipant({ email, cityId, zoneId });
   } catch (error) {
-    if (error instanceof ParticipantVerificationError) {
+    if (error instanceof ParticipantRegistrationError) {
       return { ok: false as const, message: error.publicMessage };
     }
-    logParticipantVerificationFailure("server-action", error);
     return {
       ok: false as const,
-      message: "Verification is temporarily unavailable. Please try again later.",
+      message: "Registration is temporarily unavailable. Please try again later.",
     };
   }
-}
-
-export async function checkParticipantSession() {
-  return Boolean(await getVerifiedParticipantId());
 }
 
 export async function submitSurvey(input: {

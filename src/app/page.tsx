@@ -4,14 +4,9 @@ import { connection } from "next/server";
 
 export const instant = false;
 
-export default async function Home({
-  searchParams,
-}: {
-  searchParams: Promise<{ verified?: string }>;
-}) {
+export default async function Home() {
   await connection();
   let cities;
-  const params = await searchParams;
   try {
     cities = await getActiveCities();
   } catch {
@@ -25,5 +20,5 @@ export default async function Home({
       </main>
     );
   }
-  return <ParticipantExperience cities={cities} verificationState={params.verified} />;
+  return <ParticipantExperience cities={cities} />;
 }

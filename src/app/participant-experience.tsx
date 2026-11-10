@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   ArrowRight,
   Check,
@@ -12,15 +12,14 @@ import {
 } from "lucide-react";
 
 import {
-  checkParticipantSession,
   loadQuestions,
   loadZones,
-  requestVerification,
+  register,
   submitSurvey,
 } from "@/app/actions";
 import type { City, SurveyQuestion, Zone } from "@/lib/survey-data";
 
-type Props = { cities: City[]; verificationState?: string };
+type Props = { cities: City[] };
 type Step = "welcome" | "profile" | "survey" | "consent" | "review" | "confirmation";
 
 const steps: Array<{ key: Step; label: string }> = [
@@ -32,7 +31,6 @@ const steps: Array<{ key: Step; label: string }> = [
 
 export default function ParticipantExperience({
   cities,
-  verificationState,
 }: Props) {
   const [step, setStep] = useState<Step>("welcome");
   const [cityId, setCityId] = useState("");
@@ -44,8 +42,6 @@ export default function ParticipantExperience({
   const [researchConsent, setResearchConsent] = useState(false);
   const [publicConsent, setPublicConsent] = useState(false);
   const [communicationConsent, setCommunicationConsent] = useState(false);
-  const [verificationSent, setVerificationSent] = useState(verificationState === "1");
-  const [verified, setVerified] = useState(false);
   const [confirmation, setConfirmation] = useState<{
     publicId: string;
     number: number;
@@ -55,19 +51,6 @@ export default function ParticipantExperience({
 
   const selectedCity = cities.find((city) => city.id === cityId);
   const currentStep = steps.findIndex(({ key }) => key === step);
-
-  useEffect(() => {
-    if (verificationState !== "1") return;
-    void checkParticipantSession().then((sessionIsValid) => {
-      setVerified(sessionIsValid);
-      setStep("profile");
-      setMessage(
-        sessionIsValid
-          ? "Email verified. You can continue your survey."
-          : "This verification link is no longer active.",
-      );
-    });
-  }, [verificationState]);
 
   async function chooseCity(value: string) {
     setCityId(value);
@@ -95,23 +78,10 @@ export default function ParticipantExperience({
     setLoading(true);
     setMessage("");
     try {
-      if (!verified) {
-        if (!verificationSent) {
-          const result = await requestVerification(email, cityId);
-          if (!result.ok) {
-            setMessage(result.message);
-            return;
-          }
-          setVerificationSent(true);
-          setMessage("Check your inbox for a one-time verification link.");
-          return;
-        }
-        const sessionIsValid = await checkParticipantSession();
-        if (!sessionIsValid) {
-          setMessage("Verify your email using the link we sent before continuing.");
-          return;
-        }
-        setVerified(true);
+      const registration = await register(email, cityId, zoneId);
+      if (!registration.ok) {
+        setMessage(registration.message);
+        return;
       }
       setQuestions(await loadQuestions(cityId));
       setStep("survey");
@@ -226,7 +196,7 @@ export default function ParticipantExperience({
                     <ShieldCheck className="size-4 text-emerald-600" /> Privacy-first
                   </span>
                   <span className="flex items-center gap-2">
-                    <Mail className="size-4 text-emerald-600" /> Verified email
+                    <Mail className="size-4 text-emerald-600" /> Private email
                   </span>
                   <span>About 5 minutes</span>
                 </div>
@@ -262,7 +232,7 @@ export default function ParticipantExperience({
               </h2>
               <p className="mt-3 text-slate-600">
                 We use your city and zone to show the right questions. Your email
-                is used for one-time verification and remains private.
+                is stored privately and is not used to verify ownership.
               </p>
               <div className="mt-8 grid gap-5 sm:grid-cols-2">
                 <label className="text-sm font-semibold">
@@ -309,15 +279,9 @@ export default function ParticipantExperience({
                   className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 font-normal outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
                 />
                 <span className="mt-2 block text-xs font-normal text-slate-500">
-                  We&apos;ll send a single-use verification link.
+                  Your email stays private and is not used for account recovery.
                 </span>
               </label>
-              {verificationSent && !verified && (
-                <p className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">
-                  Verification email sent. Open the link, then return here and
-                  continue.
-                </p>
-              )}
               {message && (
                 <p role="alert" className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
                   {message}
@@ -336,7 +300,7 @@ export default function ParticipantExperience({
                   className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-6 py-3 font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
                 >
                   {loading && <LoaderCircle className="size-4 animate-spin" />}
-                  {verificationSent && !verified ? "I verified my email" : "Verify email"}{" "}
+                  Continue to survey{" "}
                   <ArrowRight className="size-4" />
                 </button>
               </div>
