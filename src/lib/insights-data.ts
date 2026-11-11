@@ -369,7 +369,6 @@ export async function getPublicInsights(): Promise<PublicInsights> {
   const cityById = new Map(cityRows.map((city) => [city.id, city.name]));
   const recentResponses = [...selectedSubmissions]
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
-    .slice(0, 12)
     .flatMap((submission) => {
       const publicParticipantId = publicIds.get(submission.participant_id);
       const city = cityById.get(submission.city_id);
