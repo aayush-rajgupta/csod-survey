@@ -11,11 +11,13 @@ export async function generateStaticParams() {
 
 export default async function CityInsightsPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ citySlug: string }>;
+  searchParams: Promise<{ version?: string }>;
 }) {
   await connection();
-  const { city, insights } = await getPublicCityInsights((await params).citySlug);
+  const { city, insights } = await getPublicCityInsights((await params).citySlug, (await searchParams).version);
   if (!city) return <NotFoundCity />;
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_right,#d1fae5,transparent_35%),var(--background)]">

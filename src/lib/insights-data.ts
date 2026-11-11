@@ -4,7 +4,8 @@ import { createServiceClient } from "@/lib/supabase/service";
 
 export const CITY_RESPONSE_THRESHOLD = 1;
 export const CATEGORY_SUPPRESSION_THRESHOLD = 5;
-const INSIGHTS_SURVEY_VERSIONS = ["v2", "v3"] as const;
+export const INSIGHTS_SURVEY_VERSIONS = ["v1", "v2", "v3"] as const;
+export type InsightsSurveyVersion = (typeof INSIGHTS_SURVEY_VERSIONS)[number];
 
 const publicQuestionKeys = [
   "perceived_air_quality",
@@ -57,6 +58,8 @@ export type InsightMetric = {
   key: PublicQuestionKey;
   question: string;
   sampleSize: number;
+  responseType: "line" | "bar";
+  selectionCount: number;
   distribution: InsightDistribution[];
 };
 
@@ -70,6 +73,7 @@ export type InsightCity = {
 
 export type PublicInsights = {
   surveyVersion: string;
+  versionTotals: Record<InsightsSurveyVersion, number>;
   responseCount: number;
   participatingCityCount: number;
   averageAirQuality: number | null;
@@ -118,11 +122,6 @@ function asString(value: unknown): string | null {
 function asNumber(value: unknown): number | null {
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-function versionRank(version: string): number {
-  const match = version.match(/\d+/u);
-  return match ? Number(match[0]) : 0;
 }
 
 function formatOption(value: string, rules: Record<string, unknown>): string {
@@ -179,9 +178,7 @@ function buildMetric(
   const options = Array.isArray(question?.options)
     ? question.options.map(asString).filter((value): value is string => value !== null)
     : [];
-  const values = answers
-    .filter((answer) => submissionIds.has(answer.submission_id))
-    .flatMap((answer) => answerValues(answer.answer, question ?? {
+  const fallbackQuestion: QuestionRow = {
       id: "",
       question_key: key,
       question_text: questionText,
@@ -189,16 +186,26 @@ function buildMetric(
       options: [],
       validation_rules: {},
       survey_version: "",
-    }));
+    };
+  const resolvedQuestion = question ?? fallbackQuestion;
+  const valuesBySubmission = new Map<string, string[]>();
+  for (const answer of answers) {
+    if (!submissionIds.has(answer.submission_id)) continue;
+    const values = answerValues(answer.answer, resolvedQuestion);
+    if (values.length) valuesBySubmission.set(answer.submission_id, values);
+  }
+  const values = [...valuesBySubmission.values()].flat();
 
   for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
-  const sampleSize = values.length;
+  const sampleSize = valuesBySubmission.size;
   const orderedKeys = options.length ? options : [...counts.keys()].sort((a, b) => Number(a) - Number(b) || a.localeCompare(b));
 
   return {
     key,
     question: questionText,
     sampleSize,
+    responseType: resolvedQuestion.question_type === "linear_scale" ? "line" : "bar",
+    selectionCount: values.length,
     distribution: orderedKeys
       .filter((value) => counts.has(value))
       .map((value) => ({
@@ -220,10 +227,23 @@ function averageForMetric(metric: InsightMetric): number | null {
 }
 
 function emptyMetric(key: PublicQuestionKey): InsightMetric {
-  return { key, question: key.replaceAll("_", " "), sampleSize: 0, distribution: [] };
+  return {
+    key,
+    question: key.replaceAll("_", " "),
+    sampleSize: 0,
+    responseType: "bar",
+    selectionCount: 0,
+    distribution: [],
+  };
 }
 
-export async function getPublicInsights(): Promise<PublicInsights> {
+function emptyVersionTotals(): Record<InsightsSurveyVersion, number> {
+  return { v1: 0, v2: 0, v3: 0 };
+}
+
+export async function getPublicInsights(
+  requestedVersion: string = "v3",
+): Promise<PublicInsights> {
   const supabase = createServiceClient();
   const [{ data: submissions, error: submissionError }, { data: cities, error: cityError }] =
     await Promise.all([
@@ -245,6 +265,7 @@ export async function getPublicInsights(): Promise<PublicInsights> {
   if (!submissionIds.length) {
     return {
       surveyVersion: "none",
+      versionTotals: emptyVersionTotals(),
       responseCount: 0,
       participatingCityCount: 0,
       averageAirQuality: null,
@@ -261,31 +282,43 @@ export async function getPublicInsights(): Promise<PublicInsights> {
 
   const { data: consentRows, error: consentError } = await supabase
     .from("consent_records")
-    .select("submission_id, consent_event, event_provenance, event_sequence")
+    .select("submission_id, consent_event, consent_version, event_provenance, event_sequence")
     .eq("consent_type", "public_display")
     .in("submission_id", submissionIds)
     .order("event_sequence", { ascending: false });
   if (consentError) throw new Error("Unable to verify public-display consent.");
 
-  const latestConsent = new Map<string, { event: string; provenance: string }>();
+  const latestConsent = new Map<string, {
+    event: string;
+    provenance: string;
+    version: string;
+  }>();
   for (const consent of consentRows ?? []) {
     if (!latestConsent.has(consent.submission_id)) {
       latestConsent.set(consent.submission_id, {
         event: consent.consent_event,
         provenance: consent.event_provenance,
+        version: consent.consent_version,
       });
     }
   }
   const eligibleSubmissions = submissionRows.filter((submission) => {
     const consent = latestConsent.get(submission.id);
-    return consent?.event === "granted" && consent.provenance !== "legacy_ambiguous";
+    return consent?.event === "granted" &&
+      consent.version === submission.survey_version &&
+      consent.provenance !== "legacy_ambiguous";
   });
-  const versions = [...new Set(eligibleSubmissions.map((submission) => submission.survey_version))]
-    .filter((version): version is (typeof INSIGHTS_SURVEY_VERSIONS)[number] =>
-      INSIGHTS_SURVEY_VERSIONS.includes(version as (typeof INSIGHTS_SURVEY_VERSIONS)[number]),
-    )
-    .sort((a, b) => versionRank(b) - versionRank(a));
-  const surveyVersion = versions[0] ?? "none";
+  const versionTotals = emptyVersionTotals();
+  for (const submission of eligibleSubmissions) {
+    if (submission.survey_version in versionTotals) {
+      versionTotals[submission.survey_version as InsightsSurveyVersion] += 1;
+    }
+  }
+  const surveyVersion: InsightsSurveyVersion = INSIGHTS_SURVEY_VERSIONS.includes(
+    requestedVersion as InsightsSurveyVersion,
+  )
+    ? requestedVersion as InsightsSurveyVersion
+    : "v3";
   const selectedSubmissions = eligibleSubmissions.filter(
     (submission) => submission.survey_version === surveyVersion,
   );
@@ -294,6 +327,7 @@ export async function getPublicInsights(): Promise<PublicInsights> {
   if (!selectedIds.length) {
     return {
       surveyVersion,
+      versionTotals,
       responseCount: 0,
       participatingCityCount: 0,
       averageAirQuality: null,
@@ -385,6 +419,7 @@ export async function getPublicInsights(): Promise<PublicInsights> {
 
   return {
     surveyVersion,
+    versionTotals,
     responseCount: selectedSubmissions.length,
     participatingCityCount: insightCities.filter((city) => city.responseCount > 0).length,
     averageAirQuality: averageForMetric(metricsByKey.get("perceived_air_quality") ?? emptyMetric("perceived_air_quality")),
@@ -419,13 +454,14 @@ export async function getPublicResponseDetail(
     .eq("submission_number", submissionNumber)
     .eq("public_visibility", true)
     .eq("moderation_status", "approved")
+    .in("survey_version", [...INSIGHTS_SURVEY_VERSIONS])
     .limit(1);
   if (candidateError || !candidateSubmissions?.[0]) return null;
   const submission = candidateSubmissions[0] as SubmissionRow;
 
   const { data: consentRows, error: consentError } = await supabase
     .from("consent_records")
-    .select("consent_event, event_provenance, event_sequence")
+    .select("consent_event, consent_version, event_provenance, event_sequence")
     .eq("submission_id", submission.id)
     .eq("consent_type", "public_display")
     .order("event_sequence", { ascending: false })
@@ -434,6 +470,7 @@ export async function getPublicResponseDetail(
   if (
     consentError ||
     consent?.consent_event !== "granted" ||
+    consent?.consent_version !== submission.survey_version ||
     consent.event_provenance === "legacy_ambiguous"
   ) return null;
 
@@ -471,10 +508,13 @@ export async function getPublicResponseDetail(
   };
 }
 
-export async function getPublicCityInsights(citySlug: string): Promise<{
+export async function getPublicCityInsights(
+  citySlug: string,
+  requestedVersion?: string,
+): Promise<{
   insights: PublicInsights;
   city: InsightCity | undefined;
 }> {
-  const insights = await getPublicInsights();
+  const insights = await getPublicInsights(requestedVersion);
   return { insights, city: insights.cities.find((candidate) => candidate.slug === citySlug) };
 }

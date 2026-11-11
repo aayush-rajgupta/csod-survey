@@ -4,7 +4,7 @@ import { connection } from "next/server";
 
 import { InsightsCharts } from "@/app/insights/insights-charts";
 import { RecentResponses } from "@/app/insights/recent-responses";
-import { getPublicInsights } from "@/lib/insights-data";
+import { getPublicInsights, INSIGHTS_SURVEY_VERSIONS } from "@/lib/insights-data";
 
 export const metadata = { title: "Public insights" };
 
@@ -12,10 +12,15 @@ function Kpi({ label, value, detail }: { label: string; value: string; detail: s
   return <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">{label}</p><p className="mt-3 text-3xl font-semibold tracking-tight">{value}</p><p className="mt-2 text-xs text-slate-500">{detail}</p></div>;
 }
 
-export default async function InsightsPage() {
+export default async function InsightsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ version?: string }>;
+}) {
   await connection();
+  const { version } = await searchParams;
   let insights;
-  try { insights = await getPublicInsights(); } catch { return <InsightsError />; }
+  try { insights = await getPublicInsights(version); } catch { return <InsightsError />; }
   const hasData = insights.responseCount > 0;
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_right,#d1fae5,transparent_35%),var(--background)]">
@@ -23,7 +28,18 @@ export default async function InsightsPage() {
         <header className="flex items-center justify-between"><Link href="/" className="font-semibold tracking-tight">CSOD Survey</Link><nav className="flex items-center gap-4 text-sm"><Link href="/" className="text-slate-500 hover:text-emerald-700">Take the survey</Link><Link href="/insights" className="font-semibold text-emerald-700">Insights</Link></nav></header>
         <section className="py-16"><p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">Public insights</p><h1 className="mt-4 max-w-4xl text-5xl font-semibold leading-[1.05] tracking-tight sm:text-7xl">What residents are reporting about air quality.</h1><p className="mt-6 max-w-2xl text-lg leading-8 text-slate-600">Explore descriptive, consent-aware aggregates from voluntary citizen reports across five cities. This is not an official AQI measurement.</p></section>
         {!hasData ? <EmptyState responseCount={insights.responseCount} /> : <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Kpi label="Eligible public responses" value={insights.responseCount.toLocaleString()} detail={`Survey version ${insights.surveyVersion}`} /><Kpi label="Participating cities" value={String(insights.participatingCityCount)} detail="With at least one eligible response" /><Kpi label="Average perceived air quality" value={insights.averageAirQuality?.toFixed(1) ?? "—"} detail="Valid 1–10 answers" /><Kpi label="Average transport awareness" value={insights.averageTransportAwareness?.toFixed(1) ?? "—"} detail="Valid 1–10 answers" /></div>
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div><p className="text-sm font-semibold">Survey version</p><p className="mt-1 text-sm text-slate-500">Versions are shown separately and never combined.</p></div>
+            <form method="get" className="flex items-center gap-3">
+              <label htmlFor="survey-version" className="text-sm text-slate-500">Select version</label>
+              <select id="survey-version" name="version" defaultValue={insights.surveyVersion} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm">
+                {INSIGHTS_SURVEY_VERSIONS.map((surveyVersion) => <option key={surveyVersion} value={surveyVersion}>{surveyVersion}</option>)}
+              </select>
+              <button type="submit" className="rounded-xl bg-slate-950 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700">Apply</button>
+            </form>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Kpi label="Eligible public responses" value={insights.responseCount.toLocaleString()} detail={`Survey version ${insights.surveyVersion}`} /><Kpi label="Participating cities" value={String(insights.participatingCityCount)} detail="With at least one eligible response" /><Kpi label="Average perceived air quality" value={insights.averageAirQuality?.toFixed(1) ?? "—"} detail="Valid configured rating answers" /><Kpi label="Average transport awareness" value={insights.averageTransportAwareness?.toFixed(1) ?? "—"} detail="Valid configured rating answers" /></div>
+          <div className="mt-4 grid gap-4 sm:grid-cols-3">{INSIGHTS_SURVEY_VERSIONS.map((surveyVersion) => <Kpi key={surveyVersion} label={`${surveyVersion} eligible responses`} value={String(insights.versionTotals[surveyVersion])} detail="Approved, public, consented" />)}</div>
           <section className="mt-8 grid gap-4 md:grid-cols-2 lg:grid-cols-5">{insights.cities.map((city) => <Link key={city.slug} href={`/insights/cities/${city.slug}`} className="group rounded-3xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:border-emerald-300"><div className="flex items-center justify-between"><MapPin className="size-5 text-emerald-600" /><ArrowRight className="size-4 text-slate-400 transition group-hover:translate-x-1" /></div><h2 className="mt-5 font-semibold">{city.name}</h2><p className="mt-1 text-sm text-slate-500">{city.eligible ? `${city.responseCount} public responses` : "City breakdown requires n≥1"}</p></Link>)}</section>
           <div className="mt-8"><InsightsCharts insights={insights} /></div>
           <div className="mt-8"><RecentResponses responses={insights.recentResponses} /></div>

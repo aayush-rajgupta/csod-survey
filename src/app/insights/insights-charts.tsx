@@ -2,6 +2,8 @@
 
 import {
   CartesianGrid,
+  Bar,
+  BarChart,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -29,13 +31,23 @@ function ChartCard({ title, metric }: { title: string; metric: InsightMetric }) 
       </div>
       <div className="mt-5 h-64 min-w-0">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={metric.distribution} margin={{ top: 5, right: 12, left: -20, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.12} />
-            <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} angle={metric.distribution.length > 6 ? -35 : 0} textAnchor={metric.distribution.length > 6 ? "end" : "middle"} height={metric.distribution.length > 6 ? 55 : 30} />
-            <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-            <Tooltip formatter={(value, _name, item) => [`${value} (${Number(item?.payload?.percentage ?? 0).toFixed(1)}%)`, "Responses"]} />
-            <Line type="monotone" dataKey="count" name="Responses" stroke="#059669" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-          </LineChart>
+          {metric.responseType === "line" ? (
+            <LineChart data={metric.distribution} margin={{ top: 5, right: 12, left: -20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.12} />
+              <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} />
+              <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+              <Tooltip formatter={(value, _name, item) => [`${value} (${Number(item?.payload?.percentage ?? 0).toFixed(1)}%)`, "Responses"]} />
+              <Line type="monotone" dataKey="count" name="Responses" stroke="#059669" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+            </LineChart>
+          ) : (
+            <BarChart data={metric.distribution} layout="vertical" margin={{ top: 5, right: 12, left: 20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.12} />
+              <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
+              <YAxis type="category" dataKey="label" width={120} tick={{ fontSize: 11 }} />
+              <Tooltip formatter={(value, _name, item) => [`${value} (${Number(item?.payload?.percentage ?? 0).toFixed(1)}%)`, "Selections"]} />
+              <Bar dataKey="count" name="Selections" fill="#059669" radius={[0, 6, 6, 0]} />
+            </BarChart>
+          )}
         </ResponsiveContainer>
       </div>
     </section>
@@ -67,7 +79,14 @@ function TrendChart({ insights }: { insights: PublicInsights }) {
 }
 
 export function InsightsCharts({ insights }: { insights: PublicInsights }) {
-  const metric = (key: InsightMetric["key"]) => insights.metrics.find((item) => item.key === key) ?? { key, question: key, sampleSize: 0, distribution: [] };
+  const metric = (key: InsightMetric["key"]): InsightMetric => insights.metrics.find((item) => item.key === key) ?? {
+    key,
+    question: key,
+    sampleSize: 0,
+    responseType: "bar",
+    selectionCount: 0,
+    distribution: [],
+  };
   return (
     <div className="space-y-6">
       <TrendChart insights={insights} />
