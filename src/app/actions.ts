@@ -6,7 +6,6 @@ import {
   registerParticipant,
   submitParticipantSurvey,
 } from "@/lib/participant-server";
-import { getPublicResponseDetail } from "@/lib/insights-data";
 
 export async function loadZones(cityId: string) {
   if (!cityId) return [];
@@ -40,9 +39,4 @@ export async function submitSurvey(input: {
   futureCommunication: boolean;
 }) {
   return submitParticipantSurvey(input);
-}
-
-export async function loadPublicResponseDetail(publicParticipantId: string, submissionNumber: number) {
-  if (!publicParticipantId.trim() || !Number.isInteger(submissionNumber) || submissionNumber < 1) return null;
-  return getPublicResponseDetail(publicParticipantId.trim(), submissionNumber);
 }
