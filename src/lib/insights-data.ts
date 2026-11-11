@@ -73,7 +73,6 @@ export type InsightCity = {
 
 export type PublicInsights = {
   surveyVersion: string;
-  versionTotals: Record<InsightsSurveyVersion, number>;
   responseCount: number;
   participatingCityCount: number;
   averageAirQuality: number | null;
@@ -168,16 +167,16 @@ function answerValues(answer: unknown, question: QuestionRow): string[] {
 
 function buildMetric(
   key: PublicQuestionKey,
-  question: QuestionRow | undefined,
+  questions: QuestionRow[],
   answers: AnswerRow[],
   submissionIds: Set<string>,
 ): InsightMetric {
+  const questionsById = new Map(questions.map((question) => [question.id, question]));
+  const question = questions[0];
   const questionText = question?.question_text ?? key.replaceAll("_", " ");
   const counts = new Map<string, number>();
-  const rules = asRecord(question?.validation_rules);
-  const options = Array.isArray(question?.options)
-    ? question.options.map(asString).filter((value): value is string => value !== null)
-    : [];
+  const labels = new Map<string, string>();
+  const options: string[] = [];
   const fallbackQuestion: QuestionRow = {
       id: "",
       question_key: key,
@@ -191,8 +190,19 @@ function buildMetric(
   const valuesBySubmission = new Map<string, string[]>();
   for (const answer of answers) {
     if (!submissionIds.has(answer.submission_id)) continue;
-    const values = answerValues(answer.answer, resolvedQuestion);
+    const answerQuestion = questionsById.get(answer.question_id) ?? resolvedQuestion;
+    const values = answerValues(answer.answer, answerQuestion);
     if (values.length) valuesBySubmission.set(answer.submission_id, values);
+    const answerRules = asRecord(answerQuestion.validation_rules);
+    for (const value of values) {
+      labels.set(value, formatOption(value, answerRules));
+    }
+    const answerOptions = Array.isArray(answerQuestion.options)
+      ? answerQuestion.options.map(asString).filter((value): value is string => value !== null)
+      : [];
+    for (const option of answerOptions) {
+      if (!options.includes(option)) options.push(option);
+    }
   }
   const values = [...valuesBySubmission.values()].flat();
 
@@ -204,13 +214,13 @@ function buildMetric(
     key,
     question: questionText,
     sampleSize,
-    responseType: resolvedQuestion.question_type === "linear_scale" ? "line" : "bar",
+    responseType: questions.some((item) => item.question_type === "linear_scale") ? "line" : "bar",
     selectionCount: values.length,
     distribution: orderedKeys
       .filter((value) => counts.has(value))
       .map((value) => ({
         key: value,
-        label: formatOption(value, rules),
+        label: labels.get(value) ?? value,
         count: counts.get(value) ?? 0,
         percentage: sampleSize ? ((counts.get(value) ?? 0) / sampleSize) * 100 : 0,
       })),
@@ -237,13 +247,7 @@ function emptyMetric(key: PublicQuestionKey): InsightMetric {
   };
 }
 
-function emptyVersionTotals(): Record<InsightsSurveyVersion, number> {
-  return { v1: 0, v2: 0, v3: 0 };
-}
-
-export async function getPublicInsights(
-  requestedVersion: string = "v3",
-): Promise<PublicInsights> {
+export async function getPublicInsights(): Promise<PublicInsights> {
   const supabase = createServiceClient();
   const [{ data: submissions, error: submissionError }, { data: cities, error: cityError }] =
     await Promise.all([
@@ -265,7 +269,6 @@ export async function getPublicInsights(
   if (!submissionIds.length) {
     return {
       surveyVersion: "none",
-      versionTotals: emptyVersionTotals(),
       responseCount: 0,
       participatingCityCount: 0,
       averageAirQuality: null,
@@ -308,26 +311,13 @@ export async function getPublicInsights(
       consent.version === submission.survey_version &&
       consent.provenance !== "legacy_ambiguous";
   });
-  const versionTotals = emptyVersionTotals();
-  for (const submission of eligibleSubmissions) {
-    if (submission.survey_version in versionTotals) {
-      versionTotals[submission.survey_version as InsightsSurveyVersion] += 1;
-    }
-  }
-  const surveyVersion: InsightsSurveyVersion = INSIGHTS_SURVEY_VERSIONS.includes(
-    requestedVersion as InsightsSurveyVersion,
-  )
-    ? requestedVersion as InsightsSurveyVersion
-    : "v3";
-  const selectedSubmissions = eligibleSubmissions.filter(
-    (submission) => submission.survey_version === surveyVersion,
-  );
+  const surveyVersion = "combined";
+  const selectedSubmissions = eligibleSubmissions;
   const selectedIds = selectedSubmissions.map((submission) => submission.id);
 
   if (!selectedIds.length) {
     return {
       surveyVersion,
-      versionTotals,
       responseCount: 0,
       participatingCityCount: 0,
       averageAirQuality: null,
@@ -351,18 +341,21 @@ export async function getPublicInsights(
       supabase
         .from("survey_questions")
         .select("id, question_key, question_text, question_type, options, validation_rules, survey_version")
-        .eq("survey_version", surveyVersion)
         .in("question_key", [...publicQuestionKeys]),
     ]);
   if (answerError || questionError) throw new Error("Unable to load public response aggregates.");
 
-  const questionMap = new Map(
-    ((questions ?? []) as QuestionRow[]).map((question) => [question.question_key, question]),
-  );
+  const questionRows = (questions ?? []) as QuestionRow[];
+  const questionsByKey = new Map<string, QuestionRow[]>();
+  for (const question of questionRows) {
+    const versions = questionsByKey.get(question.question_key) ?? [];
+    versions.push(question);
+    questionsByKey.set(question.question_key, versions);
+  }
   const answerRows = (answers ?? []) as AnswerRow[];
   const selectedIdSet = new Set(selectedIds);
   const allMetrics = publicQuestionKeys.map((key) =>
-    buildMetric(key, questionMap.get(key), answerRows, selectedIdSet),
+    buildMetric(key, questionsByKey.get(key) ?? [], answerRows, selectedIdSet),
   );
   const cityRows = (cities ?? []) as Array<{ id: string; slug: string; name: string }>;
   const citiesWithResponses = new Map<string, SubmissionRow[]>();
@@ -381,7 +374,7 @@ export async function getPublicInsights(
       responseCount: citySubmissions.length,
       eligible: citySubmissions.length >= CITY_RESPONSE_THRESHOLD,
       metrics: citySubmissions.length >= CITY_RESPONSE_THRESHOLD
-        ? publicQuestionKeys.map((key) => buildMetric(key, questionMap.get(key), answerRows, cityIds))
+        ? publicQuestionKeys.map((key) => buildMetric(key, questionsByKey.get(key) ?? [], answerRows, cityIds))
         : [],
     };
   });
@@ -413,13 +406,12 @@ export async function getPublicInsights(
   const dailyMetrics = Object.fromEntries(
     [...dailySubmissionIds.entries()].map(([date, ids]) => [
       date,
-      publicQuestionKeys.map((key) => buildMetric(key, questionMap.get(key), answerRows, ids)),
+      publicQuestionKeys.map((key) => buildMetric(key, questionsByKey.get(key) ?? [], answerRows, ids)),
     ]),
   );
 
   return {
     surveyVersion,
-    versionTotals,
     responseCount: selectedSubmissions.length,
     participatingCityCount: insightCities.filter((city) => city.responseCount > 0).length,
     averageAirQuality: averageForMetric(metricsByKey.get("perceived_air_quality") ?? emptyMetric("perceived_air_quality")),
@@ -508,13 +500,10 @@ export async function getPublicResponseDetail(
   };
 }
 
-export async function getPublicCityInsights(
-  citySlug: string,
-  requestedVersion?: string,
-): Promise<{
+export async function getPublicCityInsights(citySlug: string): Promise<{
   insights: PublicInsights;
   city: InsightCity | undefined;
 }> {
-  const insights = await getPublicInsights(requestedVersion);
+  const insights = await getPublicInsights();
   return { insights, city: insights.cities.find((candidate) => candidate.slug === citySlug) };
 }
