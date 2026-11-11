@@ -1,6 +1,9 @@
 import "server-only";
 
-import { createServiceClient } from "@/lib/supabase/service";
+import {
+  createServiceClient,
+  logSupabaseDiagnostics,
+} from "@/lib/supabase/service";
 
 export type City = {
   id: string;
@@ -50,11 +53,14 @@ export async function getActiveCities(): Promise<City[]> {
     .from("cities")
     .select("id, name, city_code")
     .eq("is_active", true)
-    .like("survey_version", "v%")
     .in("slug", [...supportedCitySlugs])
     .order("name");
 
-  if (error) throw new Error("Unable to load supported cities.");
+  if (error) {
+    logSupabaseDiagnostics("get-active-cities-query-failed", error);
+    throw new Error("Unable to load supported cities.");
+  }
+  logSupabaseDiagnostics("get-active-cities-query-succeeded");
   return data ?? [];
 }
 

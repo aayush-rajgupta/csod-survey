@@ -1,12 +1,20 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
+import { logSupabaseDiagnostics } from "@/lib/supabase/service";
+
 export async function createClient() {
   const cookieStore = await cookies();
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
+  logSupabaseDiagnostics("server-client-initialization");
+
   if (!url || !key) {
+    logSupabaseDiagnostics("server-client-initialization-failed", {
+      code: "MISSING_ENV",
+      message: "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY.",
+    });
     throw new Error(
       "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY.",
     );
