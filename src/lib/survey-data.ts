@@ -50,6 +50,7 @@ export async function getActiveCities(): Promise<City[]> {
     .from("cities")
     .select("id, name, city_code")
     .eq("is_active", true)
+    .like("survey_version", "v%")
     .in("slug", [...supportedCitySlugs])
     .order("name");
 

@@ -18,8 +18,11 @@ type PublicQuestionKey = (typeof publicQuestionKeys)[number];
 
 type SubmissionRow = {
   id: string;
+  participant_id: string;
   city_id: string;
   submission_date: string;
+  created_at: string;
+  submission_number: number;
   survey_version: string;
 };
 
@@ -73,6 +76,13 @@ export type PublicInsights = {
   dailyMetrics: Record<string, InsightMetric[]>;
   availableDates: string[];
   suppressionThreshold: number;
+  recentResponses: PublicResponseSummary[];
+};
+
+export type PublicResponseSummary = {
+  publicParticipantId: string;
+  city: string;
+  submittedAt: string;
 };
 
 const cityCatalog = [
@@ -209,7 +219,7 @@ export async function getPublicInsights(): Promise<PublicInsights> {
     await Promise.all([
       supabase
         .from("survey_submissions")
-        .select("id, city_id, submission_date, survey_version")
+        .select("id, participant_id, city_id, submission_date, created_at, submission_number, survey_version")
         .eq("public_visibility", true)
         .eq("moderation_status", "approved"),
       supabase.from("cities").select("id, slug, name").eq("is_active", true),
@@ -234,6 +244,7 @@ export async function getPublicInsights(): Promise<PublicInsights> {
       dailyMetrics: {},
       availableDates: [],
       suppressionThreshold: 10,
+      recentResponses: [],
     };
   }
 
@@ -279,6 +290,7 @@ export async function getPublicInsights(): Promise<PublicInsights> {
       dailyMetrics: {},
       availableDates: [],
       suppressionThreshold: 10,
+      recentResponses: [],
     };
   }
 
@@ -333,6 +345,24 @@ export async function getPublicInsights(): Promise<PublicInsights> {
     idsForDate.add(submission.id);
     dailySubmissionIds.set(submission.submission_date, idsForDate);
   }
+  const participantIds = [...new Set(selectedSubmissions.map((submission) => submission.participant_id))];
+  const { data: participants, error: participantError } = await supabase
+    .from("participants")
+    .select("id, public_participant_id")
+    .in("id", participantIds);
+  if (participantError) throw new Error("Unable to load public response cards.");
+  const publicIds = new Map((participants ?? []).map((participant) => [participant.id, participant.public_participant_id]));
+  const cityById = new Map(cityRows.map((city) => [city.id, city.name]));
+  const recentResponses = [...selectedSubmissions]
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .slice(0, 12)
+    .flatMap((submission) => {
+      const publicParticipantId = publicIds.get(submission.participant_id);
+      const city = cityById.get(submission.city_id);
+      return publicParticipantId && city
+        ? [{ publicParticipantId, city, submittedAt: submission.created_at }]
+        : [];
+    });
   const dailyMetrics = Object.fromEntries(
     [...dailySubmissionIds.entries()].map(([date, ids]) => [
       date,
@@ -352,6 +382,7 @@ export async function getPublicInsights(): Promise<PublicInsights> {
     dailyMetrics,
     availableDates: [...trend.keys()].sort(),
     suppressionThreshold: 10,
+    recentResponses,
   };
 }
 

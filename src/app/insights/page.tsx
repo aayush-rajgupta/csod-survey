@@ -3,6 +3,7 @@ import { ArrowRight, BarChart3, MapPin, ShieldCheck } from "lucide-react";
 import { connection } from "next/server";
 
 import { InsightsCharts } from "@/app/insights/insights-charts";
+import { RecentResponses } from "@/app/insights/recent-responses";
 import { getPublicInsights } from "@/lib/insights-data";
 
 export const metadata = { title: "Public insights" };
@@ -25,6 +26,7 @@ export default async function InsightsPage() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Kpi label="Eligible public responses" value={insights.responseCount.toLocaleString()} detail={`Survey version ${insights.surveyVersion}`} /><Kpi label="Participating cities" value={String(insights.participatingCityCount)} detail="With at least one eligible response" /><Kpi label="Average perceived air quality" value={insights.averageAirQuality?.toFixed(1) ?? "—"} detail="Valid 1–10 answers" /><Kpi label="Average transport awareness" value={insights.averageTransportAwareness?.toFixed(1) ?? "—"} detail="Valid 1–10 answers" /></div>
           <section className="mt-8 grid gap-4 md:grid-cols-2 lg:grid-cols-5">{insights.cities.map((city) => <Link key={city.slug} href={`/insights/cities/${city.slug}`} className="group rounded-3xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:border-emerald-300"><div className="flex items-center justify-between"><MapPin className="size-5 text-emerald-600" /><ArrowRight className="size-4 text-slate-400 transition group-hover:translate-x-1" /></div><h2 className="mt-5 font-semibold">{city.name}</h2><p className="mt-1 text-sm text-slate-500">{city.eligible ? `${city.responseCount} public responses` : "City breakdown requires n≥10"}</p></Link>)}</section>
           <div className="mt-8"><InsightsCharts insights={insights} /></div>
+          <div className="mt-8"><RecentResponses responses={insights.recentResponses} /></div>
         </>}
         <Methodology />
       </div>
