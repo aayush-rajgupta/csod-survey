@@ -545,7 +545,10 @@ export default function ParticipantExperience({
                             {getScaleLabel(question, "1")}
                           </span>
                           <span>
-                            {getScaleLabel(question, "10")}
+                            {getScaleLabel(
+                              question,
+                              String(question.options.at(-1) ?? "1"),
+                            )}
                           </span>
                         </div>
                         <div className="mt-3 grid grid-cols-5 gap-2 sm:grid-cols-10">
@@ -565,7 +568,7 @@ export default function ParticipantExperience({
                                     updateAnswer(question.id, event.target.value)
                                   }
                                   className="size-4 accent-emerald-600"
-                                  aria-label={`${value} out of 10`}
+                                  aria-label={`${value} out of ${question.options.at(-1) ?? value}`}
                                 />
                                 <span>{value}</span>
                               </label>
