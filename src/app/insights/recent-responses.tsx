@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { X } from "lucide-react";
 
 import { loadPublicResponseDetail } from "@/app/actions";
@@ -114,6 +114,28 @@ export function RecentResponses({
   responses: PublicResponseSummary[];
 }) {
   const [selected, setSelected] = useState<PublicResponseSummary | null>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const pausedRef = useRef(false);
+
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller || responses.length < 2) return;
+
+    let frameId = 0;
+    const advance = () => {
+      if (!pausedRef.current) {
+        const loopWidth = scroller.scrollWidth / 2;
+        scroller.scrollLeft += 0.5;
+        if (loopWidth > 0 && scroller.scrollLeft >= loopWidth) {
+          scroller.scrollLeft -= loopWidth;
+        }
+      }
+      frameId = requestAnimationFrame(advance);
+    };
+
+    frameId = requestAnimationFrame(advance);
+    return () => cancelAnimationFrame(frameId);
+  }, [responses.length]);
 
   return (
     <section
@@ -128,13 +150,20 @@ export function RecentResponses({
       </h2>
       {responses.length ? (
         <div
+          ref={scrollerRef}
           className="mt-5 flex snap-x gap-4 overflow-x-auto pb-2"
           tabIndex={0}
           aria-label="Recent public responses"
+          onMouseEnter={() => {
+            pausedRef.current = true;
+          }}
+          onMouseLeave={() => {
+            pausedRef.current = false;
+          }}
         >
-          {responses.map((response) => (
+          {[...responses, ...responses].map((response, index) => (
             <button
-              key={`${response.publicParticipantId}-${response.submissionNumber}`}
+              key={`${response.publicParticipantId}-${response.submissionNumber}-${index}`}
               type="button"
               onClick={() => setSelected(response)}
               className="w-72 shrink-0 snap-start rounded-2xl border border-slate-200 p-5 text-left transition hover:-translate-y-1 hover:border-emerald-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-600"
