@@ -11,7 +11,6 @@ import {
   Mail,
   ShieldCheck,
 } from "lucide-react";
-
 import {
   loadQuestions,
   loadZones,
@@ -630,7 +629,7 @@ export default function ParticipantExperience({
               <div className="mt-8 space-y-3">
                 {[
                   ["research", "Research participation", "I agree to take part in this air-quality research.", researchConsent, setResearchConsent, true],
-                  ["public", "Public display", "I agree that anonymised responses may be shared publicly.", publicConsent, setPublicConsent, false],
+                  ["public", "Public display", "I agree that my public participant ID, city, submission date and time, and anonymised structured questionnaire answers may be displayed publicly. Email addresses, internal database identifiers, and free-text responses will not be displayed publicly.", publicConsent, setPublicConsent, false],
                   ["communication", "Future communication", "I would like to hear about related research.", communicationConsent, setCommunicationConsent, false],
                 ].map(([key, title, description, checked, setter, required]) => (
                   <label key={String(key)} className="flex cursor-pointer gap-4 rounded-2xl border border-slate-200 bg-white p-5">

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { PUBLIC_DISPLAY_CONSENT_VERSION } from "@/lib/consent";
 import { createServiceClient } from "@/lib/supabase/service";
 
 export const CITY_RESPONSE_THRESHOLD = 1;
@@ -261,24 +262,31 @@ export async function getPublicInsights(): Promise<PublicInsights> {
 
   const { data: consentRows, error: consentError } = await supabase
     .from("consent_records")
-    .select("submission_id, consent_event, event_provenance, event_sequence")
+    .select("submission_id, consent_event, consent_version, event_provenance, event_sequence")
     .eq("consent_type", "public_display")
     .in("submission_id", submissionIds)
     .order("event_sequence", { ascending: false });
   if (consentError) throw new Error("Unable to verify public-display consent.");
 
-  const latestConsent = new Map<string, { event: string; provenance: string }>();
+  const latestConsent = new Map<string, {
+    event: string;
+    provenance: string;
+    version: string;
+  }>();
   for (const consent of consentRows ?? []) {
     if (!latestConsent.has(consent.submission_id)) {
       latestConsent.set(consent.submission_id, {
         event: consent.consent_event,
         provenance: consent.event_provenance,
+        version: consent.consent_version,
       });
     }
   }
   const eligibleSubmissions = submissionRows.filter((submission) => {
     const consent = latestConsent.get(submission.id);
-    return consent?.event === "granted" && consent.provenance !== "legacy_ambiguous";
+    return consent?.event === "granted" &&
+      consent.version === PUBLIC_DISPLAY_CONSENT_VERSION &&
+      consent.provenance !== "legacy_ambiguous";
   });
   const versions = [...new Set(eligibleSubmissions.map((submission) => submission.survey_version))]
     .filter((version): version is (typeof INSIGHTS_SURVEY_VERSIONS)[number] =>
@@ -420,13 +428,14 @@ export async function getPublicResponseDetail(
     .eq("submission_number", submissionNumber)
     .eq("public_visibility", true)
     .eq("moderation_status", "approved")
+    .in("survey_version", [...INSIGHTS_SURVEY_VERSIONS])
     .limit(1);
   if (candidateError || !candidateSubmissions?.[0]) return null;
   const submission = candidateSubmissions[0] as SubmissionRow;
 
   const { data: consentRows, error: consentError } = await supabase
     .from("consent_records")
-    .select("consent_event, event_provenance, event_sequence")
+    .select("consent_event, consent_version, event_provenance, event_sequence")
     .eq("submission_id", submission.id)
     .eq("consent_type", "public_display")
     .order("event_sequence", { ascending: false })
@@ -435,6 +444,7 @@ export async function getPublicResponseDetail(
   if (
     consentError ||
     consent?.consent_event !== "granted" ||
+    consent.consent_version !== PUBLIC_DISPLAY_CONSENT_VERSION ||
     consent.event_provenance === "legacy_ambiguous"
   ) return null;
 
