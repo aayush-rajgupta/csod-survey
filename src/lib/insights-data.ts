@@ -2,6 +2,9 @@ import "server-only";
 
 import { createServiceClient } from "@/lib/supabase/service";
 
+export const CITY_RESPONSE_THRESHOLD = 1;
+export const CATEGORY_SUPPRESSION_THRESHOLD = 5;
+
 const publicQuestionKeys = [
   "perceived_air_quality",
   "public_transport_awareness",
@@ -83,6 +86,12 @@ export type PublicResponseSummary = {
   publicParticipantId: string;
   city: string;
   submittedAt: string;
+  submissionNumber: number;
+};
+
+export type PublicResponseDetail = PublicResponseSummary & {
+  surveyVersion: string;
+  answers: Array<{ label: string; answer: string | string[] }>;
 };
 
 const cityCatalog = [
@@ -243,7 +252,7 @@ export async function getPublicInsights(): Promise<PublicInsights> {
       responseTrend: [],
       dailyMetrics: {},
       availableDates: [],
-      suppressionThreshold: 10,
+      suppressionThreshold: CATEGORY_SUPPRESSION_THRESHOLD,
       recentResponses: [],
     };
   }
@@ -289,7 +298,7 @@ export async function getPublicInsights(): Promise<PublicInsights> {
       responseTrend: [],
       dailyMetrics: {},
       availableDates: [],
-      suppressionThreshold: 10,
+      suppressionThreshold: CATEGORY_SUPPRESSION_THRESHOLD,
       recentResponses: [],
     };
   }
@@ -331,8 +340,8 @@ export async function getPublicInsights(): Promise<PublicInsights> {
     return {
       ...catalogCity,
       responseCount: citySubmissions.length,
-      eligible: citySubmissions.length >= 10,
-      metrics: citySubmissions.length >= 10
+      eligible: citySubmissions.length >= CITY_RESPONSE_THRESHOLD,
+      metrics: citySubmissions.length >= CITY_RESPONSE_THRESHOLD
         ? publicQuestionKeys.map((key) => buildMetric(key, questionMap.get(key), answerRows, cityIds))
         : [],
     };
@@ -360,7 +369,7 @@ export async function getPublicInsights(): Promise<PublicInsights> {
       const publicParticipantId = publicIds.get(submission.participant_id);
       const city = cityById.get(submission.city_id);
       return publicParticipantId && city
-        ? [{ publicParticipantId, city, submittedAt: submission.created_at }]
+        ? [{ publicParticipantId, city, submittedAt: submission.created_at, submissionNumber: submission.submission_number }]
         : [];
     });
   const dailyMetrics = Object.fromEntries(
@@ -381,8 +390,80 @@ export async function getPublicInsights(): Promise<PublicInsights> {
     responseTrend: [...trend.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, count]) => ({ date, count })),
     dailyMetrics,
     availableDates: [...trend.keys()].sort(),
-    suppressionThreshold: 10,
+    suppressionThreshold: CATEGORY_SUPPRESSION_THRESHOLD,
     recentResponses,
+  };
+}
+
+export async function getPublicResponseDetail(
+  publicParticipantId: string,
+  submissionNumber: number,
+): Promise<PublicResponseDetail | null> {
+  const supabase = createServiceClient();
+  const { data: participant, error: participantError } = await supabase
+    .from("participants")
+    .select("id, public_participant_id")
+    .eq("public_participant_id", publicParticipantId)
+    .maybeSingle();
+
+  if (participantError || !participant) return null;
+
+  const { data: candidateSubmissions, error: candidateError } = await supabase
+    .from("survey_submissions")
+    .select("id, participant_id, city_id, submission_date, created_at, submission_number, survey_version")
+    .eq("participant_id", participant.id)
+    .eq("submission_number", submissionNumber)
+    .eq("public_visibility", true)
+    .eq("moderation_status", "approved")
+    .limit(1);
+  if (candidateError || !candidateSubmissions?.[0]) return null;
+  const submission = candidateSubmissions[0] as SubmissionRow;
+
+  const { data: consentRows, error: consentError } = await supabase
+    .from("consent_records")
+    .select("consent_event, event_provenance, event_sequence")
+    .eq("submission_id", submission.id)
+    .eq("consent_type", "public_display")
+    .order("event_sequence", { ascending: false })
+    .limit(1);
+  const consent = consentRows?.[0];
+  if (
+    consentError ||
+    consent?.consent_event !== "granted" ||
+    consent.event_provenance === "legacy_ambiguous"
+  ) return null;
+
+  const [{ data: city }, { data: questions, error: questionError }, { data: answers, error: answerError }] =
+    await Promise.all([
+      supabase.from("cities").select("name").eq("id", submission.city_id).maybeSingle(),
+      supabase.from("survey_questions")
+        .select("id, question_key, question_text, question_type, options, validation_rules, survey_version")
+        .eq("survey_version", submission.survey_version)
+        .eq("is_active", true)
+        .order("display_order"),
+      supabase.from("survey_answers")
+        .select("question_id, answer")
+        .eq("submission_id", submission.id),
+    ]);
+  if (questionError || answerError || !city) throw new Error("Unable to load public response details.");
+
+  const questionMap = new Map((questions ?? []).map((question) => [question.id, question as QuestionRow]));
+  const publicAnswers = (answers ?? []).flatMap((answer) => {
+    const question = questionMap.get(answer.question_id);
+    if (!question || ["short_text", "long_text"].includes(question.question_type)) return [];
+    const values = answerValues(answer.answer, question);
+    return values.length
+      ? [{ label: question.question_text, answer: values.length === 1 ? formatOption(values[0], asRecord(question.validation_rules)) : values.map((value) => formatOption(value, asRecord(question.validation_rules))) }]
+      : [];
+  });
+
+  return {
+    publicParticipantId,
+    city: city.name,
+    submittedAt: submission.created_at,
+    submissionNumber: submission.submission_number,
+    surveyVersion: submission.survey_version,
+    answers: publicAnswers,
   };
 }
 

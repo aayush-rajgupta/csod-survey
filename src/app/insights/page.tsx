@@ -24,7 +24,7 @@ export default async function InsightsPage() {
         <section className="py-16"><p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">Public insights</p><h1 className="mt-4 max-w-4xl text-5xl font-semibold leading-[1.05] tracking-tight sm:text-7xl">What residents are reporting about air quality.</h1><p className="mt-6 max-w-2xl text-lg leading-8 text-slate-600">Explore descriptive, consent-aware aggregates from voluntary citizen reports across five cities. This is not an official AQI measurement.</p></section>
         {!hasData ? <EmptyState responseCount={insights.responseCount} /> : <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Kpi label="Eligible public responses" value={insights.responseCount.toLocaleString()} detail={`Survey version ${insights.surveyVersion}`} /><Kpi label="Participating cities" value={String(insights.participatingCityCount)} detail="With at least one eligible response" /><Kpi label="Average perceived air quality" value={insights.averageAirQuality?.toFixed(1) ?? "—"} detail="Valid 1–10 answers" /><Kpi label="Average transport awareness" value={insights.averageTransportAwareness?.toFixed(1) ?? "—"} detail="Valid 1–10 answers" /></div>
-          <section className="mt-8 grid gap-4 md:grid-cols-2 lg:grid-cols-5">{insights.cities.map((city) => <Link key={city.slug} href={`/insights/cities/${city.slug}`} className="group rounded-3xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:border-emerald-300"><div className="flex items-center justify-between"><MapPin className="size-5 text-emerald-600" /><ArrowRight className="size-4 text-slate-400 transition group-hover:translate-x-1" /></div><h2 className="mt-5 font-semibold">{city.name}</h2><p className="mt-1 text-sm text-slate-500">{city.eligible ? `${city.responseCount} public responses` : "City breakdown requires n≥10"}</p></Link>)}</section>
+          <section className="mt-8 grid gap-4 md:grid-cols-2 lg:grid-cols-5">{insights.cities.map((city) => <Link key={city.slug} href={`/insights/cities/${city.slug}`} className="group rounded-3xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:border-emerald-300"><div className="flex items-center justify-between"><MapPin className="size-5 text-emerald-600" /><ArrowRight className="size-4 text-slate-400 transition group-hover:translate-x-1" /></div><h2 className="mt-5 font-semibold">{city.name}</h2><p className="mt-1 text-sm text-slate-500">{city.eligible ? `${city.responseCount} public responses` : "City breakdown requires n≥1"}</p></Link>)}</section>
           <div className="mt-8"><InsightsCharts insights={insights} /></div>
           <div className="mt-8"><RecentResponses responses={insights.recentResponses} /></div>
         </>}
@@ -47,7 +47,7 @@ function EmptyState({ responseCount }: { responseCount: number }) {
       <p className="mx-auto mt-3 max-w-2xl text-slate-500">
         Responses appear here only after approved moderation, public visibility,
         and a latest granted public-display consent event. City-level breakdowns
-        require at least 10 eligible responses; smaller category breakdowns are
+        require at least 1 eligible response; smaller category breakdowns are
         suppressed.
       </p>
     </section>
