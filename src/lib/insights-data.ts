@@ -4,6 +4,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 
 export const CITY_RESPONSE_THRESHOLD = 1;
 export const CATEGORY_SUPPRESSION_THRESHOLD = 5;
+const INSIGHTS_SURVEY_VERSIONS = ["v2", "v3"] as const;
 
 const publicQuestionKeys = [
   "perceived_air_quality",
@@ -230,7 +231,8 @@ export async function getPublicInsights(): Promise<PublicInsights> {
         .from("survey_submissions")
         .select("id, participant_id, city_id, submission_date, created_at, submission_number, survey_version")
         .eq("public_visibility", true)
-        .eq("moderation_status", "approved"),
+        .eq("moderation_status", "approved")
+        .in("survey_version", [...INSIGHTS_SURVEY_VERSIONS]),
       supabase.from("cities").select("id, slug, name").eq("is_active", true),
     ]);
 
@@ -279,6 +281,9 @@ export async function getPublicInsights(): Promise<PublicInsights> {
     return consent?.event === "granted" && consent.provenance !== "legacy_ambiguous";
   });
   const versions = [...new Set(eligibleSubmissions.map((submission) => submission.survey_version))]
+    .filter((version): version is (typeof INSIGHTS_SURVEY_VERSIONS)[number] =>
+      INSIGHTS_SURVEY_VERSIONS.includes(version as (typeof INSIGHTS_SURVEY_VERSIONS)[number]),
+    )
     .sort((a, b) => versionRank(b) - versionRank(a));
   const surveyVersion = versions[0] ?? "none";
   const selectedSubmissions = eligibleSubmissions.filter(
