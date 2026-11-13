@@ -1,6 +1,10 @@
 import "server-only";
 
 import { createServiceClient } from "@/lib/supabase/service";
+import {
+  scheduleActivityOptions,
+  scheduleLocationOptions,
+} from "@/lib/daily-activity";
 
 export const CITY_RESPONSE_THRESHOLD = 1;
 export const CATEGORY_SUPPRESSION_THRESHOLD = 5;
@@ -47,6 +51,39 @@ type QuestionRow = {
   survey_version: string;
 };
 
+type DailyActivityRow = {
+  submission_id: string;
+  sequence: number;
+  start_time: string;
+  end_time: string;
+  location_category: string;
+  activity_category: string;
+  duration_minutes: number;
+};
+
+export type DailyActivityCategorySummary = {
+  category: string;
+  totalMinutes: number;
+  averageMinutes: number;
+  averageHours: number;
+  respondentCount: number;
+  respondentPercentage: number;
+};
+
+export type DailyScheduleCoverage = {
+  scheduleCount: number;
+  totalRecordedHours: number;
+  averageRecordedHours: number;
+  averageUnallocatedHours: number;
+};
+
+export type DailyActivityInsights = {
+  coverage: DailyScheduleCoverage;
+  activities: DailyActivityCategorySummary[];
+  locations: DailyActivityCategorySummary[];
+  isSuppressed: boolean;
+};
+
 export type InsightDistribution = {
   key: string;
   label: string;
@@ -69,6 +106,7 @@ export type InsightCity = {
   responseCount: number;
   eligible: boolean;
   metrics: InsightMetric[];
+  dailyActivity?: DailyActivityInsights;
 };
 
 export type PublicInsights = {
@@ -79,6 +117,7 @@ export type PublicInsights = {
   averageTransportAwareness: number | null;
   cities: InsightCity[];
   metrics: InsightMetric[];
+  dailyActivity: DailyActivityInsights;
   responseTrend: Array<{ date: string; count: number }>;
   dailyMetrics: Record<string, InsightMetric[]>;
   availableDates: string[];
@@ -247,6 +286,127 @@ function emptyMetric(key: PublicQuestionKey): InsightMetric {
   };
 }
 
+export function emptyDailyActivity(): DailyActivityInsights {
+  return {
+    coverage: {
+      scheduleCount: 0,
+      totalRecordedHours: 0,
+      averageRecordedHours: 0,
+      averageUnallocatedHours: 24,
+    },
+    activities: scheduleActivityOptions.map((category) => ({
+      category,
+      totalMinutes: 0,
+      averageMinutes: 0,
+      averageHours: 0,
+      respondentCount: 0,
+      respondentPercentage: 0,
+    })),
+    locations: scheduleLocationOptions.map((category) => ({
+      category,
+      totalMinutes: 0,
+      averageMinutes: 0,
+      averageHours: 0,
+      respondentCount: 0,
+      respondentPercentage: 0,
+    })),
+    isSuppressed: true,
+  };
+}
+
+export function buildDailyActivityInsights(
+  entries: DailyActivityRow[],
+  targetSubmissionIds: Set<string>,
+): DailyActivityInsights {
+  const filteredEntries = entries.filter((e) => targetSubmissionIds.has(e.submission_id));
+  const submissionIdsWithSchedule = new Set(filteredEntries.map((e) => e.submission_id));
+  const scheduleCount = submissionIdsWithSchedule.size;
+
+  if (scheduleCount === 0) {
+    return emptyDailyActivity();
+  }
+
+  const minutesBySubmission = new Map<string, number>();
+  for (const entry of filteredEntries) {
+    const curr = minutesBySubmission.get(entry.submission_id) ?? 0;
+    minutesBySubmission.set(entry.submission_id, curr + (entry.duration_minutes || 0));
+  }
+
+  let totalMinutesAll = 0;
+  let totalUnallocatedMinutes = 0;
+  for (const subId of submissionIdsWithSchedule) {
+    const subMins = minutesBySubmission.get(subId) ?? 0;
+    totalMinutesAll += subMins;
+    totalUnallocatedMinutes += Math.max(0, 1440 - subMins);
+  }
+
+  const totalRecordedHours = Number((totalMinutesAll / 60).toFixed(1));
+  const averageRecordedHours = Number((totalMinutesAll / scheduleCount / 60).toFixed(1));
+  const averageUnallocatedHours = Number((totalUnallocatedMinutes / scheduleCount / 60).toFixed(1));
+
+  const activityMap = new Map<string, { totalMinutes: number; respondents: Set<string> }>();
+  for (const cat of scheduleActivityOptions) {
+    activityMap.set(cat, { totalMinutes: 0, respondents: new Set<string>() });
+  }
+  for (const entry of filteredEntries) {
+    const item = activityMap.get(entry.activity_category);
+    if (item) {
+      item.totalMinutes += entry.duration_minutes || 0;
+      item.respondents.add(entry.submission_id);
+    }
+  }
+
+  const activities: DailyActivityCategorySummary[] = scheduleActivityOptions.map((category) => {
+    const data = activityMap.get(category)!;
+    const respCount = data.respondents.size;
+    return {
+      category,
+      totalMinutes: data.totalMinutes,
+      averageMinutes: Math.round(data.totalMinutes / scheduleCount),
+      averageHours: Number((data.totalMinutes / scheduleCount / 60).toFixed(1)),
+      respondentCount: respCount,
+      respondentPercentage: Number(((respCount / scheduleCount) * 100).toFixed(1)),
+    };
+  });
+
+  const locationMap = new Map<string, { totalMinutes: number; respondents: Set<string> }>();
+  for (const cat of scheduleLocationOptions) {
+    locationMap.set(cat, { totalMinutes: 0, respondents: new Set<string>() });
+  }
+  for (const entry of filteredEntries) {
+    const item = locationMap.get(entry.location_category);
+    if (item) {
+      item.totalMinutes += entry.duration_minutes || 0;
+      item.respondents.add(entry.submission_id);
+    }
+  }
+
+  const locations: DailyActivityCategorySummary[] = scheduleLocationOptions.map((category) => {
+    const data = locationMap.get(category)!;
+    const respCount = data.respondents.size;
+    return {
+      category,
+      totalMinutes: data.totalMinutes,
+      averageMinutes: Math.round(data.totalMinutes / scheduleCount),
+      averageHours: Number((data.totalMinutes / scheduleCount / 60).toFixed(1)),
+      respondentCount: respCount,
+      respondentPercentage: Number(((respCount / scheduleCount) * 100).toFixed(1)),
+    };
+  });
+
+  return {
+    coverage: {
+      scheduleCount,
+      totalRecordedHours,
+      averageRecordedHours,
+      averageUnallocatedHours,
+    },
+    activities,
+    locations,
+    isSuppressed: scheduleCount < CATEGORY_SUPPRESSION_THRESHOLD,
+  };
+}
+
 export async function getPublicInsights(): Promise<PublicInsights> {
   const supabase = createServiceClient();
   const [{ data: submissions, error: submissionError }, { data: cities, error: cityError }] =
@@ -273,8 +433,15 @@ export async function getPublicInsights(): Promise<PublicInsights> {
       participatingCityCount: 0,
       averageAirQuality: null,
       averageTransportAwareness: null,
-      cities: cityCatalog.map((city) => ({ ...city, responseCount: 0, eligible: false, metrics: [] })),
+      cities: cityCatalog.map((city) => ({
+        ...city,
+        responseCount: 0,
+        eligible: false,
+        metrics: [],
+        dailyActivity: emptyDailyActivity(),
+      })),
       metrics: publicQuestionKeys.map(emptyMetric),
+      dailyActivity: emptyDailyActivity(),
       responseTrend: [],
       dailyMetrics: {},
       availableDates: [],
@@ -322,8 +489,15 @@ export async function getPublicInsights(): Promise<PublicInsights> {
       participatingCityCount: 0,
       averageAirQuality: null,
       averageTransportAwareness: null,
-      cities: cityCatalog.map((city) => ({ ...city, responseCount: 0, eligible: false, metrics: [] })),
+      cities: cityCatalog.map((city) => ({
+        ...city,
+        responseCount: 0,
+        eligible: false,
+        metrics: [],
+        dailyActivity: emptyDailyActivity(),
+      })),
       metrics: publicQuestionKeys.map(emptyMetric),
+      dailyActivity: emptyDailyActivity(),
       responseTrend: [],
       dailyMetrics: {},
       availableDates: [],
@@ -332,19 +506,29 @@ export async function getPublicInsights(): Promise<PublicInsights> {
     };
   }
 
-  const [{ data: answers, error: answerError }, { data: questions, error: questionError }] =
-    await Promise.all([
-      supabase
-        .from("survey_answers")
-        .select("submission_id, question_id, answer")
-        .in("submission_id", selectedIds),
-      supabase
-        .from("survey_questions")
-        .select("id, question_key, question_text, question_type, options, validation_rules, survey_version")
-        .in("question_key", [...publicQuestionKeys]),
-    ]);
-  if (answerError || questionError) throw new Error("Unable to load public response aggregates.");
+  const [
+    { data: answers, error: answerError },
+    { data: questions, error: questionError },
+    { data: scheduleEntries, error: scheduleError },
+  ] = await Promise.all([
+    supabase
+      .from("survey_answers")
+      .select("submission_id, question_id, answer")
+      .in("submission_id", selectedIds),
+    supabase
+      .from("survey_questions")
+      .select("id, question_key, question_text, question_type, options, validation_rules, survey_version")
+      .in("question_key", [...publicQuestionKeys]),
+    supabase
+      .from("daily_activity_entries")
+      .select("submission_id, sequence, start_time, end_time, location_category, activity_category, duration_minutes")
+      .in("submission_id", selectedIds),
+  ]);
+  if (answerError || questionError || scheduleError) {
+    throw new Error("Unable to load public response aggregates.");
+  }
 
+  const scheduleRows = (scheduleEntries ?? []) as DailyActivityRow[];
   const questionRows = (questions ?? []) as QuestionRow[];
   const questionsByKey = new Map<string, QuestionRow[]>();
   for (const question of questionRows) {
@@ -376,6 +560,7 @@ export async function getPublicInsights(): Promise<PublicInsights> {
       metrics: citySubmissions.length >= CITY_RESPONSE_THRESHOLD
         ? publicQuestionKeys.map((key) => buildMetric(key, questionsByKey.get(key) ?? [], answerRows, cityIds))
         : [],
+      dailyActivity: buildDailyActivityInsights(scheduleRows, cityIds),
     };
   });
   const trend = new Map<string, number>();
@@ -418,6 +603,7 @@ export async function getPublicInsights(): Promise<PublicInsights> {
     averageTransportAwareness: averageForMetric(metricsByKey.get("public_transport_awareness") ?? emptyMetric("public_transport_awareness")),
     cities: insightCities,
     metrics: allMetrics,
+    dailyActivity: buildDailyActivityInsights(scheduleRows, selectedIdSet),
     responseTrend: [...trend.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, count]) => ({ date, count })),
     dailyMetrics,
     availableDates: [...trend.keys()].sort(),

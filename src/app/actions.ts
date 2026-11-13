@@ -12,6 +12,7 @@ import {
   adminHideSubmission as adminHide,
   adminRestoreSubmission as adminRestore,
   adminSetModeration as adminSetMod,
+  adminRetrySubmissionNotification as adminRetryNotif,
 } from "@/lib/admin-server";
 
 export async function loadZones(cityId: string) {
@@ -73,4 +74,8 @@ export async function adminSetModeration(
   status: "approved" | "rejected" | "pending",
 ) {
   return adminSetMod(submissionId, status);
+}
+
+export async function adminRetryNotification(submissionId: string) {
+  return adminRetryNotif(submissionId);
 }

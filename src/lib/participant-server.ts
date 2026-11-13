@@ -6,6 +6,7 @@ import { cookies } from "next/headers";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getActiveQuestions } from "@/lib/survey-data";
 import { validateDailyActivities, type DailyActivityEntry } from "@/lib/daily-activity";
+import { sendSubmissionNotification } from "@/lib/email-notifications";
 import {
   validateCheckboxSelection,
   validateMultipleChoiceAnswer,
@@ -285,10 +286,23 @@ export async function submitParticipantSurvey(input: {
   if (error || !data?.[0]) {
     throw new Error(error?.message ?? "Unable to submit the survey.");
   }
-  return data[0] as {
+  const submissionResult = data[0] as {
     submission_id: string;
     public_participant_id: string;
     submission_number: number;
     survey_version: string;
   };
+
+  // Process email notification outbox safely server-side
+  // Email delivery failure must never fail the committed survey submission
+  try {
+    await sendSubmissionNotification(submissionResult.submission_id);
+  } catch (emailErr) {
+    console.error("[participant-submission-email-failed]", {
+      submission_id: submissionResult.submission_id,
+      error: emailErr instanceof Error ? emailErr.message : String(emailErr),
+    });
+  }
+
+  return submissionResult;
 }

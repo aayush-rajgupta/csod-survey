@@ -2,6 +2,7 @@ import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { sendSubmissionNotification } from "@/lib/email-notifications";
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
@@ -104,5 +105,19 @@ export async function adminSetModeration(
   }
 
   return { ok: true };
+}
+
+/**
+ * Retries sending an email notification for a submission. Requires admin authorization.
+ */
+export async function adminRetrySubmissionNotification(
+  submissionId: string,
+): Promise<{ ok: boolean; status: "sent" | "failed" | "skipped"; error?: string }> {
+  if (!submissionId || !isUuid(submissionId)) {
+    throw new Error("Invalid submission ID.");
+  }
+
+  await verifyAdminAuth();
+  return sendSubmissionNotification(submissionId, { forceRetry: true });
 }
 

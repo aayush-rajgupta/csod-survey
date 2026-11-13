@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test tests/unit/daily-activity.test.ts tests/unit/publication-workflow.test.ts tests/unit/schedule-interval.test.ts tests/unit/survey-submission-validation.test.ts tests/unit/access-architecture.test.ts",
+    "test": "tsx -r ./tests/mock-server-only.cjs --test tests/unit/daily-activity.test.ts tests/unit/quick-select-schedule.test.ts tests/unit/publication-workflow.test.ts tests/unit/schedule-interval.test.ts tests/unit/survey-submission-validation.test.ts tests/unit/access-architecture.test.ts tests/unit/insights-activity.test.ts tests/unit/email-notifications.test.ts",
     "test:db": "tsx --test tests/integration/database.test.ts",
     "typecheck": "tsc --noEmit"
   },
@@ -23,6 +23,7 @@
     "react-dom": "19.3.0",
     "react-hook-form": "^7.91.0",
     "recharts": "^3.10.1",
+    "resend": "^6.38.0",
     "tailwind-merge": "^3.7.0",
     "zod": "^4.6.7"
   },
@@ -35,6 +36,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.4.6",
     "pg": "^8.23.1",
+    "server-only": "^0.0.1",
     "supabase": "^3.1.0",
     "tailwindcss": "4.3.3",
     "tsx": "^4.23.15",

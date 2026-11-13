@@ -78,11 +78,39 @@ the token is kept in an HttpOnly/Secure/SameSite cookie. The service-role key
 must remain server-only. Migration `0007` must be applied before `0008`; it
 provides the session table and transactional submission foundation.
 
-The v4 survey also captures a repeatable daily activity schedule. Entries store
-time, general location, and activity categories as normalized children of each
+The v4 survey also captures a repeatable daily activity schedule using
+simplified quick-select time buttons (30-minute intervals across the 24-hour
+clock). Entries follow a guided sequence: Activity selection -> Location
+selection -> Start time -> End time (with automatic Next Day indication for
+overnight periods) -> Automatic duration calculation. Entries store time,
+general location, and activity categories as normalized children of each
 submission. Overnight durations are calculated across midnight, while
 incomplete or overlapping entries are rejected before the atomic submission
-transaction. Schedule rows are not included in public response projections.
+transaction.
+
+### Daily Activity Insights
+
+Public Insights aggregates daily schedule information safely without exposing
+individual schedules or identifying data:
+- Average daily hours by activity category (Sleeping/Resting, Indoor work, Commuting, Walking/Exercising, Outdoor work, Shopping/Errands, Household activities, Other).
+- Average daily hours by location category (Home, Road/Commuting, Office/Workplace, School/College, Outdoor public space, Market/Commercial, Industrial, Other).
+- Respondent participation counts and percentages.
+- Schedule coverage KPIs: eligible recorded schedules, total recorded hours, average recorded hours per schedule, and average unallocated time.
+- Strict privacy: only approved v4 submissions with granted public-display consent are aggregated. Categories with fewer than 5 respondents (`CATEGORY_SUPPRESSION_THRESHOLD = 5`) are suppressed.
+
+### Resend Email Notifications
+
+Every successful survey submission automatically enqueues a durable notification
+in `public.submission_email_notifications` within the submission transaction. The
+server then dispatches an administrative alert email via Resend:
+- Includes full participant details, city, zone, submission time, complete survey responses (HTML-escaped), daily activity schedule table, and distinct consent statuses.
+- Protected by a unique idempotency key (`csod-submission-notification/[SUBMISSION_UUID]`).
+- Email delivery failure never fails the committed survey submission.
+- Protected admin retry mechanism available via server actions (`adminRetryNotification`).
+- Required server-side environment variables:
+  - `RESEND_API_KEY`: Secret API key from Resend.
+  - `RESEND_FROM_EMAIL`: Verified sender address on a custom domain (e.g. `notifications@yourdomain.org`). A verified domain in Resend is required for production delivery.
+  - `CSOD_SUBMISSION_NOTIFICATION_EMAIL`: Destination inbox for project administrators.
 
 ## Database hardening
 

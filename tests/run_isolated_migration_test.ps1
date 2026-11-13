@@ -673,6 +673,75 @@ try {
     Check-Visibility $subPersist "Admin Persist - Step 3: Subsequent Grant (must remain hidden)" "f" "t"
     Write-Host "  [OK] Admin hide remained persistent across subsequent consent events" -ForegroundColor Green
 
+    # =========================================================================
+    # §12 Submission Email Notifications Outbox & Permissions Test
+    # =========================================================================
+    Write-Host "`n=== 12. Verifying submission_email_notifications Outbox & RLS ==="
+
+    # 12.1 Verify table existence and structure
+    $notifTableCheck = & $psql -h localhost -p $port -U postgres -d postgres -t -A -c "
+    SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'submission_email_notifications';
+    "
+    if ($notifTableCheck -ne "1") {
+        throw "Table submission_email_notifications was not found in public schema."
+    }
+    Write-Host "  [OK] Table submission_email_notifications exists" -ForegroundColor Green
+
+    # 12.2 Negative Test: 'anon' cannot access notification records
+    Write-Host "--- 12.2 Negative Test: 'anon' cannot access submission_email_notifications ---"
+    Invoke-PsqlExpectedError @"
+    SET ROLE anon;
+    SELECT * FROM public.submission_email_notifications;
+"@ "permission denied for table submission_email_notifications"
+
+    # 12.3 Negative Test: 'authenticated' cannot access notification records
+    Write-Host "--- 12.3 Negative Test: 'authenticated' cannot access submission_email_notifications ---"
+    Invoke-PsqlExpectedError @"
+    SET ROLE authenticated;
+    SELECT * FROM public.submission_email_notifications;
+"@ "permission denied for table submission_email_notifications"
+
+    # 12.4 Verify RPC automatically enqueues pending notification row
+    Write-Host "--- 12.4 Verify submit_participant_survey RPC enqueued pending notification row ---"
+    $outboxStatus = (& $psql -h localhost -p $port -U postgres -d postgres -t -A -c "
+    SELECT concat(status, '|', attempt_count) FROM public.submission_email_notifications
+    WHERE submission_id = (
+        SELECT id FROM survey_submissions
+        WHERE participant_id = (SELECT id FROM participants WHERE public_participant_id = 'TEST-PART-RPC-04')
+    );
+    ").Trim()
+
+    if ($outboxStatus -ne "pending|0") {
+        throw "Expected outbox row to be 'pending|0', got '$outboxStatus'"
+    }
+    Write-Host "  [OK] submit_participant_survey RPC automatically enqueued pending outbox notification (status: $outboxStatus)" -ForegroundColor Green
+
+    # 12.5 Positive Test: service_role can select and update outbox status (sending, sent)
+    Write-Host "--- 12.5 Positive Test: service_role can select and update outbox status ---"
+    & $psql -h localhost -p $port -U postgres -d postgres -v "ON_ERROR_STOP=1" -c "
+    SET ROLE service_role;
+    SELECT count(*) FROM public.submission_email_notifications;
+
+    UPDATE public.submission_email_notifications
+       SET status = 'sending',
+           sending_started_at = clock_timestamp(),
+           attempt_count = attempt_count + 1
+     WHERE submission_id = (
+         SELECT id FROM survey_submissions
+         WHERE participant_id = (SELECT id FROM participants WHERE public_participant_id = 'TEST-PART-RPC-04')
+     );
+
+    UPDATE public.submission_email_notifications
+       SET status = 'sent',
+           provider_email_id = 'msg_test_12345',
+           sent_at = clock_timestamp()
+     WHERE submission_id = (
+         SELECT id FROM survey_submissions
+         WHERE participant_id = (SELECT id FROM participants WHERE public_participant_id = 'TEST-PART-RPC-04')
+     );
+    "
+    Write-Host "  [OK] service_role successfully selected and transitioned notification status to sending and sent" -ForegroundColor Green
+
     Write-Host "`n========================================================"
     Write-Host "ALL REAL POSTGRESQL & ISOLATED TESTS PASSED 100%!" -ForegroundColor Green
     Write-Host "========================================================"

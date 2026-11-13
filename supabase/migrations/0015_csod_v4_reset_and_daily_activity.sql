@@ -24,6 +24,7 @@ begin;
 drop table if exists public.participant_sessions cascade;
 drop table if exists public.participant_verification_tokens cascade;
 drop table if exists public.participant_verification_rate_limits cascade;
+drop table if exists public.submission_email_notifications cascade;
 drop table if exists public.daily_activity_entries cascade;
 drop table if exists public.survey_answers cascade;
 drop table if exists public.consent_records cascade;
@@ -202,6 +203,19 @@ create table public.daily_activity_entries (
   )
 );
 
+create table public.submission_email_notifications (
+  id uuid primary key default gen_random_uuid(),
+  submission_id uuid not null unique references public.survey_submissions(id) on delete cascade,
+  status text not null check (status in ('pending', 'sending', 'sent', 'failed')) default 'pending',
+  attempt_count integer not null default 0,
+  provider_email_id text,
+  last_error text,
+  created_at timestamptz not null default clock_timestamp(),
+  updated_at timestamptz not null default clock_timestamp(),
+  sent_at timestamptz,
+  sending_started_at timestamptz
+);
+
 -- =========================================================================
 -- §4  Indexes
 -- =========================================================================
@@ -225,6 +239,8 @@ create index consent_records_participant_submission_idx
   on public.consent_records (participant_id, submission_id, event_sequence desc);
 create index daily_activity_entries_submission_idx
   on public.daily_activity_entries (submission_id, sequence);
+create index idx_submission_email_notifications_status_created
+  on public.submission_email_notifications (status, created_at);
 
 -- =========================================================================
 -- §5  Advisory lock helper for consent streams
@@ -1297,6 +1313,12 @@ begin
     (p_participant_id, new_submission_id, 'future_communication', v_survey_version,
       case when p_future_communication then 'granted'::public.consent_event else 'declined'::public.consent_event end);
 
+  -- 13. Enqueue durable email notification outbox record
+  insert into public.submission_email_notifications
+    (submission_id, status)
+  values
+    (new_submission_id, 'pending');
+
   return query select new_submission_id, participant_record.public_participant_id,
     allocated_number, v_survey_version;
 end;
@@ -1634,7 +1656,8 @@ revoke all on table
   public.participant_city_sequences, public.participant_sessions,
   public.participant_submission_sequences, public.survey_questions,
   public.survey_submissions, public.survey_answers, public.consent_records,
-  public.daily_activity_entries, public.admin_users
+  public.daily_activity_entries, public.submission_email_notifications,
+  public.admin_users
 from public, anon, authenticated;
 
 -- Grant all table privileges to service_role
@@ -1643,7 +1666,8 @@ grant all on table
   public.participant_city_sequences, public.participant_sessions,
   public.participant_submission_sequences, public.survey_questions,
   public.survey_submissions, public.survey_answers, public.consent_records,
-  public.daily_activity_entries, public.admin_users
+  public.daily_activity_entries, public.submission_email_notifications,
+  public.admin_users
 to service_role;
 
 -- Revoke truncate unconditionally from all roles
@@ -1652,7 +1676,8 @@ revoke truncate on table
   public.participant_city_sequences, public.participant_sessions,
   public.participant_submission_sequences, public.survey_questions,
   public.survey_submissions, public.survey_answers, public.consent_records,
-  public.daily_activity_entries, public.admin_users
+  public.daily_activity_entries, public.submission_email_notifications,
+  public.admin_users
 from public, anon, authenticated, service_role;
 
 -- Function execution grants
@@ -1696,7 +1721,8 @@ begin
     'cities', 'city_zones', 'participants', 'participant_city_sequences',
     'participant_sessions', 'participant_submission_sequences',
     'survey_questions', 'survey_submissions', 'survey_answers',
-    'consent_records', 'daily_activity_entries', 'admin_users'
+    'consent_records', 'daily_activity_entries',
+    'submission_email_notifications', 'admin_users'
   ] loop
     execute format('alter table public.%I enable row level security', tbl);
     execute format('alter table public.%I force row level security', tbl);

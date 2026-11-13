@@ -22,11 +22,15 @@ import {
   activityDurationMinutes,
   createEmptyActivity,
   formatActivityDuration,
+  formatTime12Hour,
+  isOvernightActivity,
   toggleCheckboxSelection,
   validateDailyActivities,
   type DailyActivityEntry,
   scheduleActivityOptions,
   scheduleLocationOptions,
+  ALL_30_MIN_TIMES,
+  COMMON_TIME_OPTIONS,
 } from "@/lib/daily-activity";
 import type { City, SurveyQuestion, Zone } from "@/lib/survey-data";
 import { validateCheckboxSelection } from "@/lib/survey-validation";
@@ -617,64 +621,20 @@ export default function ParticipantExperience({
                   Please describe how you typically spend your day by adding the time periods during which you are at different locations. Include your activities from waking up until going to sleep.
                 </p>
                 <div className="mt-4 space-y-4">
-                  {dailyActivities.map((entry, index) => {
-                    const duration = activityDurationMinutes(entry);
-                    return (
-                      <div key={index} className="rounded-xl border border-slate-200 p-4">
-                        <div className="flex items-center justify-between gap-3">
-                          <p>Activity {index + 1}</p>
-                          {dailyActivities.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => setDailyActivities((current) => current.filter((_, entryIndex) => entryIndex !== index))}
-                              className="text-sm font-semibold text-slate-600 hover:text-emerald-700"
-                            >
-                              Remove
-                            </button>
-                          )}
-                        </div>
-                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                          <label className="font-normal">
-                            Start time
-                            <input type="time" value={entry.startTime} onChange={(event) => updateActivity(index, "startTime", event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-emerald-500" />
-                          </label>
-                          <label className="font-normal">
-                            End time
-                            <input type="time" value={entry.endTime} onChange={(event) => updateActivity(index, "endTime", event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-emerald-500" />
-                          </label>
-                          <label className="font-normal">
-                            Location
-                            <select value={entry.locationCategory} onChange={(event) => updateActivity(index, "locationCategory", event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white p-3 outline-none focus:border-emerald-500">
-                              <option value="">Choose a location</option>
-                              {scheduleLocationOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-                            </select>
-                          </label>
-                          {entry.locationCategory === "Other" && (
-                            <label className="font-normal">
-                              Describe location
-                              <input value={entry.locationOther} onChange={(event) => updateActivity(index, "locationOther", event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-emerald-500" />
-                            </label>
-                          )}
-                          <label className="font-normal">
-                            Activity
-                            <select value={entry.activityCategory} onChange={(event) => updateActivity(index, "activityCategory", event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white p-3 outline-none focus:border-emerald-500">
-                              <option value="">Choose an activity</option>
-                              {scheduleActivityOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-                            </select>
-                          </label>
-                          {entry.activityCategory === "Other" && (
-                            <label className="font-normal">
-                              Describe activity
-                              <input value={entry.activityOther} onChange={(event) => updateActivity(index, "activityOther", event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-emerald-500" />
-                            </label>
-                          )}
-                        </div>
-                        <p className="mt-3 text-sm font-normal text-slate-600">
-                          Duration: {formatActivityDuration(duration)}
-                        </p>
-                      </div>
-                    );
-                  })}
+                  {dailyActivities.map((entry, index) => (
+                    <ActivityItem
+                      key={index}
+                      entry={entry}
+                      index={index}
+                      totalActivities={dailyActivities.length}
+                      onUpdate={updateActivity}
+                      onRemove={(idx) =>
+                        setDailyActivities((current) =>
+                          current.filter((_, entryIndex) => entryIndex !== idx),
+                        )
+                      }
+                    />
+                  ))}
                 </div>
                 <button type="button" onClick={() => setDailyActivities((current) => [...current, createEmptyActivity()])} className="mt-4 rounded-full border border-emerald-600 px-4 py-2 font-semibold text-emerald-700 hover:bg-emerald-50">
                   Add another activity
@@ -788,5 +748,245 @@ export default function ParticipantExperience({
         <footer className="border-t border-slate-200/80 py-5 text-xs text-slate-500">CSOD Survey · Your participation helps build better public understanding of air quality.</footer>
       </div>
     </main>
+  );
+}
+
+function ActivityItem({
+  entry,
+  index,
+  totalActivities,
+  onUpdate,
+  onRemove,
+}: {
+  entry: DailyActivityEntry;
+  index: number;
+  totalActivities: number;
+  onUpdate: (index: number, field: keyof DailyActivityEntry, value: string) => void;
+  onRemove: (index: number) => void;
+}) {
+  const [showAllStartTimes, setShowAllStartTimes] = useState(false);
+  const [showAllEndTimes, setShowAllEndTimes] = useState(false);
+
+  const duration = activityDurationMinutes(entry);
+  const overnight = isOvernightActivity(entry.startTime, entry.endTime);
+
+  // Progressive disclosure steps:
+  // Step 1: Activity chosen
+  const hasActivity = Boolean(entry.activityCategory);
+  // Step 2: Location chosen
+  const hasLocation = hasActivity && Boolean(entry.locationCategory);
+  // Step 3: Start time chosen
+  const hasStartTime = hasLocation && Boolean(entry.startTime);
+  // Step 4: End time chosen
+  const hasEndTime = hasStartTime && Boolean(entry.endTime);
+
+  const startTimesToDisplay = showAllStartTimes
+    ? ALL_30_MIN_TIMES
+    : COMMON_TIME_OPTIONS;
+
+  const endTimesToDisplay = showAllEndTimes
+    ? ALL_30_MIN_TIMES
+    : COMMON_TIME_OPTIONS;
+
+  return (
+    <div className="rounded-xl border border-slate-200 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-semibold text-slate-900">Activity {index + 1}</p>
+        {totalActivities > 1 && (
+          <button
+            type="button"
+            onClick={() => onRemove(index)}
+            className="text-sm font-semibold text-slate-600 hover:text-emerald-700"
+          >
+            Remove
+          </button>
+        )}
+      </div>
+
+      {/* Step 1: Select activity */}
+      <div className="mt-3">
+        <label className="block text-sm font-semibold text-slate-900">
+          Activity <span className="text-emerald-600">*</span>
+          <select
+            value={entry.activityCategory}
+            onChange={(event) => onUpdate(index, "activityCategory", event.target.value)}
+            className="mt-1 w-full rounded-xl border border-slate-200 bg-white p-3 font-normal outline-none focus:border-emerald-500"
+          >
+            <option value="">Choose an activity</option>
+            {scheduleActivityOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        {entry.activityCategory === "Other" && (
+          <label className="mt-2 block text-sm font-normal text-slate-700">
+            Describe activity
+            <input
+              type="text"
+              value={entry.activityOther}
+              onChange={(event) => onUpdate(index, "activityOther", event.target.value)}
+              placeholder="Describe activity"
+              className="mt-1 w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-emerald-500"
+            />
+          </label>
+        )}
+      </div>
+
+      {/* Step 2: Select location (revealed only after Activity is selected) */}
+      {hasActivity && (
+        <div className="mt-4">
+          <label className="block text-sm font-semibold text-slate-900">
+            Location <span className="text-emerald-600">*</span>
+            <select
+              value={entry.locationCategory}
+              onChange={(event) => onUpdate(index, "locationCategory", event.target.value)}
+              className="mt-1 w-full rounded-xl border border-slate-200 bg-white p-3 font-normal outline-none focus:border-emerald-500"
+            >
+              <option value="">Choose a location</option>
+              {scheduleLocationOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+          {entry.locationCategory === "Other" && (
+            <label className="mt-2 block text-sm font-normal text-slate-700">
+              Describe location
+              <input
+                type="text"
+                value={entry.locationOther}
+                onChange={(event) => onUpdate(index, "locationOther", event.target.value)}
+                placeholder="Describe location"
+                className="mt-1 w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-emerald-500"
+              />
+            </label>
+          )}
+        </div>
+      )}
+
+      {/* Step 3: Select start time (revealed only after Activity and Location are selected) */}
+      {hasLocation && (
+        <div className="mt-4">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-slate-900">
+              When did this activity start? <span className="text-emerald-600">*</span>
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowAllStartTimes((prev) => !prev)}
+              className="text-xs font-semibold text-emerald-700 hover:text-emerald-800 underline underline-offset-4"
+            >
+              {showAllStartTimes ? "Show common times" : "More times"}
+            </button>
+          </div>
+          <div
+            className={
+              showAllStartTimes
+                ? "mt-2 grid grid-cols-3 gap-1.5 sm:grid-cols-4 md:grid-cols-6"
+                : "mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4"
+            }
+          >
+            {startTimesToDisplay.map((time) => {
+              const isSelected = entry.startTime === time;
+              return (
+                <button
+                  key={time}
+                  type="button"
+                  onClick={() => onUpdate(index, "startTime", time)}
+                  className={`rounded-xl border px-3 py-2 text-xs sm:text-sm font-medium transition text-center ${
+                    isSelected
+                      ? "border-emerald-600 bg-emerald-50 text-emerald-900 font-semibold ring-2 ring-emerald-500/20"
+                      : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                  }`}
+                >
+                  {formatTime12Hour(time)}
+                </button>
+              );
+            })}
+          </div>
+          {!showAllStartTimes && entry.startTime && !COMMON_TIME_OPTIONS.includes(entry.startTime as (typeof COMMON_TIME_OPTIONS)[number]) && (
+            <p className="mt-2 text-xs text-slate-600">
+              Selected start time: <span className="font-semibold text-emerald-800">{formatTime12Hour(entry.startTime)}</span>
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Step 4: Select end time (revealed only after Start time is selected) */}
+      {hasStartTime && (
+        <div className="mt-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-semibold text-slate-900">
+                When did this activity end? <span className="text-emerald-600">*</span>
+              </p>
+              {overnight && (
+                <span className="inline-flex items-center rounded-md bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 border border-amber-200">
+                  Next day
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowAllEndTimes((prev) => !prev)}
+              className="text-xs font-semibold text-emerald-700 hover:text-emerald-800 underline underline-offset-4"
+            >
+              {showAllEndTimes ? "Show common times" : "More times"}
+            </button>
+          </div>
+          <div
+            className={
+              showAllEndTimes
+                ? "mt-2 grid grid-cols-3 gap-1.5 sm:grid-cols-4 md:grid-cols-6"
+                : "mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4"
+            }
+          >
+            {endTimesToDisplay.map((time) => {
+              const isSelected = entry.endTime === time;
+              const isOvernightItem = isOvernightActivity(entry.startTime, time);
+              return (
+                <button
+                  key={time}
+                  type="button"
+                  onClick={() => onUpdate(index, "endTime", time)}
+                  className={`rounded-xl border px-3 py-2 text-xs sm:text-sm font-medium transition text-center ${
+                    isSelected
+                      ? "border-emerald-600 bg-emerald-50 text-emerald-900 font-semibold ring-2 ring-emerald-500/20"
+                      : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                  }`}
+                >
+                  {formatTime12Hour(time)}
+                  {isOvernightItem && <span className="ml-1 text-[10px] text-amber-700 font-normal">(next day)</span>}
+                </button>
+              );
+            })}
+          </div>
+          {!showAllEndTimes && entry.endTime && !COMMON_TIME_OPTIONS.includes(entry.endTime as (typeof COMMON_TIME_OPTIONS)[number]) && (
+            <p className="mt-2 text-xs text-slate-600">
+              Selected end time: <span className="font-semibold text-emerald-800">{formatTime12Hour(entry.endTime)}</span>
+              {overnight && <span className="ml-1 text-amber-700 font-semibold">(next day)</span>}
+            </p>
+          )}
+          {entry.startTime === entry.endTime && (
+            <p className="mt-2 text-xs text-amber-700">
+              Start and end times cannot be identical.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Step 5: Automatic duration calculation */}
+      {hasEndTime && (
+        <div className="mt-4 flex items-center justify-between rounded-xl bg-slate-50 px-4 py-2.5 text-sm text-slate-700 font-medium">
+          <span>Duration: {formatActivityDuration(duration)}</span>
+          {overnight && (
+            <span className="text-xs font-semibold text-amber-700">Crosses midnight (+1 day)</span>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

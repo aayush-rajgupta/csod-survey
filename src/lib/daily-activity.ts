@@ -20,6 +20,41 @@ export const scheduleActivityOptions = [
   "Other",
 ] as const;
 
+export const COMMON_TIME_OPTIONS = [
+  "06:00",
+  "07:00",
+  "08:00",
+  "09:00",
+  "12:00",
+  "17:00",
+  "18:00",
+  "20:00",
+] as const;
+
+export const ALL_30_MIN_TIMES: string[] = Array.from({ length: 48 }, (_, i) => {
+  const hours = Math.floor(i / 2);
+  const minutes = (i % 2) * 30;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+});
+
+export function formatTime12Hour(value: string): string {
+  const mins = minutesFromTime(value);
+  if (mins === null) return value;
+  const hours = Math.floor(mins / 60);
+  const minutes = mins % 60;
+  const period = hours >= 12 ? "PM" : "AM";
+  const displayHours = hours % 12 === 0 ? 12 : hours % 12;
+  const displayMinutes = String(minutes).padStart(2, "0");
+  return `${displayHours}:${displayMinutes} ${period}`;
+}
+
+export function isOvernightActivity(startTime: string, endTime: string): boolean {
+  const start = minutesFromTime(startTime);
+  const end = minutesFromTime(endTime);
+  if (start === null || end === null || start === end) return false;
+  return end < start;
+}
+
 export type DailyActivityEntry = {
   startTime: string;
   endTime: string;
