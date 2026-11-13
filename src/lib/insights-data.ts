@@ -4,7 +4,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 
 export const CITY_RESPONSE_THRESHOLD = 1;
 export const CATEGORY_SUPPRESSION_THRESHOLD = 5;
-export const INSIGHTS_SURVEY_VERSIONS = ["v1", "v2", "v3"] as const;
+export const INSIGHTS_SURVEY_VERSIONS = ["v4"] as const;
 export type InsightsSurveyVersion = (typeof INSIGHTS_SURVEY_VERSIONS)[number];
 
 const publicQuestionKeys = [

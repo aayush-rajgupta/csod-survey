@@ -36,8 +36,12 @@ least-privilege policies alongside their server-side operations.
    `supabase/migrations/0008_fix_verification_rate_limit_digest.sql`, then
    `supabase/migrations/0009_fix_participant_id_type.sql`, then
    `supabase/migrations/0010_fix_submission_survey_version_ambiguity.sql`, then
-   `supabase/migrations/0011_update_rating_question_scales.sql`
-   in a Supabase project.
+   `supabase/migrations/0011_update_rating_question_scales.sql`, then
+   `supabase/migrations/0015_csod_v4_reset_and_daily_activity.sql` in the
+   existing CSOD Survey Supabase project. Migration 0015 resets
+   application-owned participant and submission data while preserving Auth,
+   Storage, cities/zones, question definitions, and administrator role rows.
+   Run `supabase/seed.sql` after the migration to reconcile v4 definitions.
 4. Start the development server:
 
 ```bash
@@ -73,6 +77,12 @@ opaque session; only the SHA-256 session hash is stored in the database, while
 the token is kept in an HttpOnly/Secure/SameSite cookie. The service-role key
 must remain server-only. Migration `0007` must be applied before `0008`; it
 provides the session table and transactional submission foundation.
+
+The v4 survey also captures a repeatable daily activity schedule. Entries store
+time, general location, and activity categories as normalized children of each
+submission. Overnight durations are calculated across midnight, while
+incomplete or overlapping entries are rejected before the atomic submission
+transaction. Schedule rows are not included in public response projections.
 
 ## Database hardening
 

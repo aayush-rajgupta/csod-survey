@@ -18,7 +18,18 @@ import {
   register,
   submitSurvey,
 } from "@/app/actions";
+import {
+  activityDurationMinutes,
+  createEmptyActivity,
+  formatActivityDuration,
+  toggleCheckboxSelection,
+  validateDailyActivities,
+  type DailyActivityEntry,
+  scheduleActivityOptions,
+  scheduleLocationOptions,
+} from "@/lib/daily-activity";
 import type { City, SurveyQuestion, Zone } from "@/lib/survey-data";
+import { validateCheckboxSelection } from "@/lib/survey-validation";
 
 type Props = { cities: City[] };
 type Step = "welcome" | "profile" | "survey" | "consent" | "review" | "confirmation";
@@ -41,6 +52,9 @@ export default function ParticipantExperience({
   const [zones, setZones] = useState<Zone[]>([]);
   const [questions, setQuestions] = useState<SurveyQuestion[]>([]);
   const [answers, setAnswers] = useState<Record<string, AnswerValue>>({});
+  const [dailyActivities, setDailyActivities] = useState<DailyActivityEntry[]>([
+    createEmptyActivity(),
+  ]);
   const [researchConsent, setResearchConsent] = useState(false);
   const [publicConsent, setPublicConsent] = useState(false);
   const [communicationConsent, setCommunicationConsent] = useState(false);
@@ -99,6 +113,18 @@ export default function ParticipantExperience({
     setAnswers((current) => ({ ...current, [questionId]: value }));
   }
 
+  function updateActivity(
+    index: number,
+    field: keyof DailyActivityEntry,
+    value: string,
+  ) {
+    setDailyActivities((current) =>
+      current.map((entry, entryIndex) =>
+        entryIndex === index ? { ...entry, [field]: value } : entry,
+      ),
+    );
+  }
+
   function isQuestionVisible(question: SurveyQuestion): boolean {
     const rule = question.visibility_rule;
     if (!rule || typeof rule !== "object") return true;
@@ -128,31 +154,17 @@ export default function ParticipantExperience({
 
     if (question.question_type === "checkboxes") {
       const selected = Array.isArray(answer) ? answer : [];
-      if (question.is_required && selected.length === 0) {
-        return "Select at least one option.";
-      }
-      if (selected.some((value) => !allowedValues.includes(value))) {
-        return "Choose only the listed options.";
-      }
-      const minItems = typeof rules.min_items === "number" ? rules.min_items : 0;
-      const maxItems =
-        typeof rules.max_items === "number" ? rules.max_items : Number.POSITIVE_INFINITY;
-      if (selected.length < minItems) {
-        return `Select at least ${minItems} option${minItems === 1 ? "" : "s"}.`;
-      }
-      if (selected.length > maxItems) {
-        return `Select no more than ${maxItems} options.`;
-      }
       const mutuallyExclusive = Array.isArray(rules.mutually_exclusive)
         ? rules.mutually_exclusive.map(String)
         : [];
-      if (
-        mutuallyExclusive.some((value) => selected.includes(value)) &&
-        selected.length > 1
-      ) {
-        return "Choose either a single 'Not sure' or 'I do not notice these sources' option.";
-      }
-      return null;
+      return validateCheckboxSelection({
+        selected,
+        allowedValues,
+        required: question.is_required,
+        minItems: typeof rules.min_items === "number" ? rules.min_items : undefined,
+        maxItems: typeof rules.max_items === "number" ? rules.max_items : undefined,
+        mutuallyExclusive,
+      });
     }
 
     const value = typeof answer === "string" ? answer.trim() : "";
@@ -227,6 +239,11 @@ export default function ParticipantExperience({
       });
       return;
     }
+    const scheduleValidation = validateDailyActivities(dailyActivities);
+    if (scheduleValidation.errors.length) {
+      setMessage(scheduleValidation.errors[0]);
+      return;
+    }
     setMessage("");
     setStep("consent");
   }
@@ -263,8 +280,10 @@ export default function ParticipantExperience({
           question_id,
           answer,
         })),
+        researchConsent,
         publicDisplay: publicConsent,
         futureCommunication: communicationConsent,
+        dailyActivities,
       });
       setConfirmation({
         publicId: result.public_participant_id,
@@ -506,9 +525,14 @@ export default function ParticipantExperience({
                                     : [];
                                   updateAnswer(
                                     question.id,
-                                    event.target.checked
-                                      ? [...current, value]
-                                      : current.filter((item) => item !== value),
+                                    toggleCheckboxSelection(
+                                      current,
+                                      value,
+                                      event.target.checked,
+                                      Array.isArray(question.validation_rules.mutually_exclusive)
+                                        ? question.validation_rules.mutually_exclusive.map(String)
+                                        : [],
+                                    ),
                                   );
                                 }}
                                 className="size-4 accent-emerald-600"
@@ -586,6 +610,85 @@ export default function ParticipantExperience({
                     )}
                   </div>
                 ))}
+              </div>
+              <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-5 text-sm font-semibold">
+                <span>Daily Activity Schedule <span className="ml-1 text-emerald-600">*</span></span>
+                <p className="mt-2 font-normal text-slate-600">
+                  Please describe how you typically spend your day by adding the time periods during which you are at different locations. Include your activities from waking up until going to sleep.
+                </p>
+                <div className="mt-4 space-y-4">
+                  {dailyActivities.map((entry, index) => {
+                    const duration = activityDurationMinutes(entry);
+                    return (
+                      <div key={index} className="rounded-xl border border-slate-200 p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <p>Activity {index + 1}</p>
+                          {dailyActivities.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => setDailyActivities((current) => current.filter((_, entryIndex) => entryIndex !== index))}
+                              className="text-sm font-semibold text-slate-600 hover:text-emerald-700"
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                          <label className="font-normal">
+                            Start time
+                            <input type="time" value={entry.startTime} onChange={(event) => updateActivity(index, "startTime", event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-emerald-500" />
+                          </label>
+                          <label className="font-normal">
+                            End time
+                            <input type="time" value={entry.endTime} onChange={(event) => updateActivity(index, "endTime", event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-emerald-500" />
+                          </label>
+                          <label className="font-normal">
+                            Location
+                            <select value={entry.locationCategory} onChange={(event) => updateActivity(index, "locationCategory", event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white p-3 outline-none focus:border-emerald-500">
+                              <option value="">Choose a location</option>
+                              {scheduleLocationOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                            </select>
+                          </label>
+                          {entry.locationCategory === "Other" && (
+                            <label className="font-normal">
+                              Describe location
+                              <input value={entry.locationOther} onChange={(event) => updateActivity(index, "locationOther", event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-emerald-500" />
+                            </label>
+                          )}
+                          <label className="font-normal">
+                            Activity
+                            <select value={entry.activityCategory} onChange={(event) => updateActivity(index, "activityCategory", event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white p-3 outline-none focus:border-emerald-500">
+                              <option value="">Choose an activity</option>
+                              {scheduleActivityOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                            </select>
+                          </label>
+                          {entry.activityCategory === "Other" && (
+                            <label className="font-normal">
+                              Describe activity
+                              <input value={entry.activityOther} onChange={(event) => updateActivity(index, "activityOther", event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-emerald-500" />
+                            </label>
+                          )}
+                        </div>
+                        <p className="mt-3 text-sm font-normal text-slate-600">
+                          Duration: {formatActivityDuration(duration)}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+                <button type="button" onClick={() => setDailyActivities((current) => [...current, createEmptyActivity()])} className="mt-4 rounded-full border border-emerald-600 px-4 py-2 font-semibold text-emerald-700 hover:bg-emerald-50">
+                  Add another activity
+                </button>
+                {(() => {
+                  const summary = validateDailyActivities(dailyActivities);
+                  return (
+                    <div className="mt-4 text-sm font-normal text-slate-600">
+                      <p>Total scheduled: {formatActivityDuration(summary.totalMinutes)}</p>
+                      <p>Unallocated time: {formatActivityDuration(summary.unallocatedMinutes)}</p>
+                      {summary.errors.length > 0 && <p className="mt-2 text-amber-800">{summary.errors[0]}</p>}
+                    </div>
+                  );
+                })()}
               </div>
               {message && <p role="alert" className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">{message}</p>}
               <div className="mt-8 flex justify-between">

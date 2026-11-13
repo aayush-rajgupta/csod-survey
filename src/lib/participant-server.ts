@@ -5,6 +5,15 @@ import { cookies } from "next/headers";
 
 import { createServiceClient } from "@/lib/supabase/service";
 import { getActiveQuestions } from "@/lib/survey-data";
+import { validateDailyActivities, type DailyActivityEntry } from "@/lib/daily-activity";
+import {
+  validateCheckboxSelection,
+  validateMultipleChoiceAnswer,
+  validateTextAnswer,
+  validateNumberAnswer,
+  validateLinearScaleAnswer,
+  validateDateAnswer,
+} from "@/lib/survey-validation";
 
 const sessionCookie = "csod_participant_session";
 const sessionLifetimeSeconds = 30 * 24 * 60 * 60;
@@ -143,9 +152,15 @@ export async function submitParticipantSurvey(input: {
   cityId: string;
   zoneId: string;
   answers: Array<{ question_id: string; answer: unknown }>;
+  researchConsent: boolean;
   publicDisplay: boolean;
   futureCommunication: boolean;
+  dailyActivities: DailyActivityEntry[];
 }) {
+  if (!input.researchConsent) {
+    throw new Error("Research participation consent is required.");
+  }
+
   const participantId = await getParticipantId();
   if (!participantId) {
     throw new Error("Register before submitting the survey.");
@@ -170,90 +185,82 @@ export async function submitParticipantSurvey(input: {
   if (input.answers.some((answer) => !questionMap.has(answer.question_id))) {
     throw new Error("One or more answers are not part of the active questionnaire.");
   }
+
+  // Reject duplicate answers in submitted payload
+  if (submittedIds.size !== input.answers.length) {
+    throw new Error("Duplicate survey answers are not allowed.");
+  }
+
   for (const submitted of input.answers) {
     const question = questionMap.get(submitted.question_id);
     if (!question) continue;
-    const isCheckboxes = question.question_type === "checkboxes";
-    const selected = isCheckboxes && Array.isArray(submitted.answer)
-      ? submitted.answer.map(String)
-      : [];
-    const value = typeof submitted.answer === "string"
-      ? submitted.answer.trim()
-      : "";
     const rules = question.validation_rules;
-    if (
-      question.is_required &&
-      (isCheckboxes ? selected.length === 0 : !value)
-    ) {
-      throw new Error("Please answer every required question.");
-    }
     const allowedValues = Array.isArray(rules.allowed_values)
       ? rules.allowed_values.map(String)
       : question.options.map(String);
-    if (isCheckboxes && selected.some((item) => !allowedValues.includes(item))) {
-      throw new Error("One or more answers are not valid for the active questionnaire.");
+
+    if (question.question_type === "checkboxes") {
+      const err = validateCheckboxSelection({
+        answer: submitted.answer,
+        allowedValues,
+        required: question.is_required,
+        minItems: typeof rules.min_items === "number" ? rules.min_items : undefined,
+        maxItems: typeof rules.max_items === "number" ? rules.max_items : undefined,
+        mutuallyExclusive: Array.isArray(rules.mutually_exclusive)
+          ? rules.mutually_exclusive.map(String)
+          : undefined,
+        questionKey: question.question_key,
+      });
+      if (err) throw new Error(err);
+    } else if (["multiple_choice", "dropdown"].includes(question.question_type)) {
+      const err = validateMultipleChoiceAnswer({
+        answer: submitted.answer,
+        allowedValues,
+        required: question.is_required,
+        questionKey: question.question_key,
+      });
+      if (err) throw new Error(err);
+    } else if (["short_text", "long_text"].includes(question.question_type)) {
+      const err = validateTextAnswer({
+        answer: submitted.answer,
+        required: question.is_required,
+        minLength: typeof rules.min_length === "number" ? rules.min_length : undefined,
+        maxLength: typeof rules.max_length === "number" ? rules.max_length : undefined,
+        questionKey: question.question_key,
+      });
+      if (err) throw new Error(err);
+    } else if (question.question_type === "number") {
+      const err = validateNumberAnswer({
+        answer: submitted.answer,
+        required: question.is_required,
+        min: typeof rules.min === "number" ? rules.min : undefined,
+        max: typeof rules.max === "number" ? rules.max : undefined,
+        questionKey: question.question_key,
+      });
+      if (err) throw new Error(err);
+    } else if (question.question_type === "linear_scale") {
+      const err = validateLinearScaleAnswer({
+        answer: submitted.answer,
+        required: question.is_required,
+        min: typeof rules.min === "number" ? rules.min : undefined,
+        max: typeof rules.max === "number" ? rules.max : undefined,
+        step: typeof rules.step === "number" ? rules.step : undefined,
+        questionKey: question.question_key,
+      });
+      if (err) throw new Error(err);
+    } else if (question.question_type === "date") {
+      const err = validateDateAnswer({
+        answer: submitted.answer,
+        required: question.is_required,
+        questionKey: question.question_key,
+      });
+      if (err) throw new Error(err);
     }
-    if (!isCheckboxes && question.options.length && value && !allowedValues.includes(value)) {
-      throw new Error("One or more answers are not valid for the active questionnaire.");
-    }
-    if (isCheckboxes) {
-      const minItems = typeof rules.min_items === "number" ? rules.min_items : 0;
-      const maxItems =
-        typeof rules.max_items === "number" ? rules.max_items : Number.POSITIVE_INFINITY;
-      const mutuallyExclusive = Array.isArray(rules.mutually_exclusive)
-        ? rules.mutually_exclusive.map(String)
-        : [];
-      if (selected.length < minItems || selected.length > maxItems) {
-        throw new Error("The number of selected options is not valid.");
-      }
-      if (
-        mutuallyExclusive.some((item) => selected.includes(item)) &&
-        selected.length > 1
-      ) {
-        throw new Error("Mutually exclusive options cannot be selected together.");
-      }
-    }
-    const numericValue = Number(value);
-    if (
-      ["number", "linear_scale"].includes(question.question_type) &&
-      value &&
-      !Number.isFinite(numericValue)
-    ) {
-      throw new Error("A numeric answer is required for one of the questions.");
-    }
-    if (
-      question.question_type === "linear_scale" &&
-      value &&
-      !Number.isInteger(numericValue)
-    ) {
-      throw new Error("A whole-number answer is required for this question.");
-    }
-    const minLength =
-      typeof rules.min_length === "number" ? rules.min_length : undefined;
-    const maxLength =
-      typeof rules.max_length === "number" ? rules.max_length : undefined;
-    const min = typeof rules.min === "number" ? rules.min : undefined;
-    const max = typeof rules.max === "number" ? rules.max : undefined;
-    if (minLength !== undefined && value.length < minLength) {
-      throw new Error("One or more answers are shorter than allowed.");
-    }
-    if (maxLength !== undefined && value.length > maxLength) {
-      throw new Error("One or more answers are longer than allowed.");
-    }
-    if (min !== undefined && Number(value) < min) {
-      throw new Error("One or more answers are below the allowed range.");
-    }
-    if (max !== undefined && Number(value) > max) {
-      throw new Error("One or more answers are above the allowed range.");
-    }
-    const step = typeof rules.step === "number" ? rules.step : undefined;
-    if (
-      step !== undefined &&
-      value &&
-      Math.abs(numericValue / step - Math.round(numericValue / step)) > 1e-9
-    ) {
-      throw new Error("One or more answers use an invalid step.");
-    }
+  }
+
+  const scheduleValidation = validateDailyActivities(input.dailyActivities);
+  if (scheduleValidation.errors.length) {
+    throw new Error(scheduleValidation.errors[0]);
   }
 
   const supabase = createServiceClient();
@@ -262,8 +269,18 @@ export async function submitParticipantSurvey(input: {
     p_city_id: input.cityId,
     p_zone_id: input.zoneId,
     p_answers: input.answers,
+    p_research_participation: input.researchConsent,
     p_public_display: input.publicDisplay,
     p_future_communication: input.futureCommunication,
+    p_daily_activities: input.dailyActivities.map((entry, index) => ({
+      sequence: index + 1,
+      start_time: entry.startTime,
+      end_time: entry.endTime,
+      location_category: entry.locationCategory,
+      location_other: entry.locationOther,
+      activity_category: entry.activityCategory,
+      activity_other: entry.activityOther,
+    })),
   });
   if (error || !data?.[0]) {
     throw new Error(error?.message ?? "Unable to submit the survey.");

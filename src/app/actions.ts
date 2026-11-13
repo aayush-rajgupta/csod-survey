@@ -7,6 +7,12 @@ import {
   submitParticipantSurvey,
 } from "@/lib/participant-server";
 import { getPublicResponseDetail } from "@/lib/insights-data";
+import type { DailyActivityEntry } from "@/lib/daily-activity";
+import {
+  adminHideSubmission as adminHide,
+  adminRestoreSubmission as adminRestore,
+  adminSetModeration as adminSetMod,
+} from "@/lib/admin-server";
 
 export async function loadZones(cityId: string) {
   if (!cityId) return [];
@@ -36,8 +42,10 @@ export async function submitSurvey(input: {
   cityId: string;
   zoneId: string;
   answers: Array<{ question_id: string; answer: unknown }>;
+  researchConsent: boolean;
   publicDisplay: boolean;
   futureCommunication: boolean;
+  dailyActivities: DailyActivityEntry[];
 }) {
   return submitParticipantSurvey(input);
 }
@@ -50,4 +58,19 @@ export async function loadPublicResponseDetail(
     return null;
   }
   return getPublicResponseDetail(publicParticipantId.trim(), submissionNumber);
+}
+
+export async function adminHideSubmission(submissionId: string) {
+  return adminHide(submissionId);
+}
+
+export async function adminRestoreSubmission(submissionId: string) {
+  return adminRestore(submissionId);
+}
+
+export async function adminSetModeration(
+  submissionId: string,
+  status: "approved" | "rejected" | "pending",
+) {
+  return adminSetMod(submissionId, status);
 }
